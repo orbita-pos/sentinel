@@ -15,6 +15,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "foundation",
         sql: schema::MIGRATION_001_FOUNDATION,
     },
+    Migration {
+        version: 2,
+        name: "matches",
+        sql: schema::MIGRATION_002_MATCHES,
+    },
+    Migration {
+        version: 3,
+        name: "static_data",
+        sql: schema::MIGRATION_003_STATIC_DATA,
+    },
 ];
 
 pub fn run_all(conn: &Connection) -> Result<(), AppError> {

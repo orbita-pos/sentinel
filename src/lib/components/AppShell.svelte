@@ -4,6 +4,7 @@
   import { currentRoute } from "../stores/router.js";
   import Dashboard from "../../routes/Dashboard.svelte";
   import Settings from "../../routes/Settings.svelte";
+  import MatchHistory from "../../routes/MatchHistory.svelte";
 
   let route = $derived($currentRoute);
 </script>
@@ -19,12 +20,7 @@
       {:else if route === "settings"}
         <Settings />
       {:else if route === "match-history"}
-        <div class="flex h-full items-center justify-center">
-          <div class="text-center">
-            <p class="text-lg" style="color: var(--text-secondary)">Match History</p>
-            <p class="text-sm" style="color: var(--text-muted)">Coming in Phase 3</p>
-          </div>
-        </div>
+        <MatchHistory />
       {:else if route === "patterns"}
         <div class="flex h-full items-center justify-center">
           <div class="text-center">

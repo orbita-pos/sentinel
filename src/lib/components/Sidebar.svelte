@@ -11,7 +11,7 @@
 
   const navItems: NavItem[] = [
     { route: "dashboard", label: "Dashboard", icon: "home" },
-    { route: "match-history", label: "Match History", icon: "history", phase: 3 },
+    { route: "match-history", label: "Match History", icon: "history" },
     { route: "patterns", label: "Patterns", icon: "brain", phase: 6 },
     { route: "improvement", label: "Improvement", icon: "trending-up", phase: 6 },
     { route: "settings", label: "Settings", icon: "settings" },
