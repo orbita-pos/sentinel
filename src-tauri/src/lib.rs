@@ -1,18 +1,26 @@
 mod database;
 mod error;
+mod lcu;
 
-// Phase 2+
-// mod lcu;
+// Phase 3+
 // mod riot_api;
 // mod game_client;
 // mod analysis;
 
+use std::sync::Arc;
+
 use database::Database;
+use lcu::LcuManager;
 use tauri::Manager;
 
 #[tauri::command]
-fn get_connection_status() -> String {
-    "disconnected".to_string()
+fn get_connection_status(lcu: tauri::State<'_, Arc<LcuManager>>) -> serde_json::Value {
+    let state = lcu.get_state();
+    serde_json::json!({
+        "status": state.status,
+        "summoner": state.summoner,
+        "game_phase": state.game_phase,
+    })
 }
 
 #[tauri::command]
@@ -42,8 +50,17 @@ pub fn run() {
             let db = Database::new(&app_handle)?;
             db.run_migrations()?;
             tracing::info!("Database initialized");
-
             app.manage(db);
+
+            // Initialize LCU Manager
+            let lcu_manager = Arc::new(LcuManager::new(app_handle.clone()));
+            app.manage(lcu_manager.clone());
+
+            // Spawn LCU manager as long-lived background task
+            tauri::async_runtime::spawn(async move {
+                lcu_manager.run().await;
+            });
+            tracing::info!("LCU manager started");
 
             Ok(())
         })
