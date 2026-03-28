@@ -192,7 +192,7 @@ async fn trigger_backfill(
         }
 
         let count = fetcher
-            .backfill(&puuid, 20)
+            .backfill(&puuid, 50)
             .await
             .map_err(|e| safe_err("Backfill", e))?;
 
@@ -204,7 +204,7 @@ async fn trigger_backfill(
     let _ = app_handle.emit("backfill-progress", serde_json::json!({"current": 0, "total": 0, "match_id": "Fetching from League client..."}));
 
     let matches = lcu_client
-        .get_match_history(&puuid, 20)
+        .get_match_history(&puuid, 50)
         .await
         .map_err(|e| safe_err("LCU match fetch", e))?;
 
@@ -226,6 +226,71 @@ async fn trigger_backfill(
     let _ = app_handle.emit("backfill-complete", serde_json::json!({"fetched": stored}));
     tracing::info!("Stored {stored} matches from LCU");
     Ok(serde_json::json!({ "fetched": stored, "source": "lcu" }))
+}
+
+/// Import full match history (up to 300 matches with timelines via API key)
+#[tauri::command]
+async fn import_full_history(
+    puuid: String,
+    max_matches: i32,
+    api_state: tauri::State<'_, Arc<AsyncMutex<ApiState>>>,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    validate_puuid(&puuid)?;
+    let max = max_matches.clamp(20, 500);
+
+    let fetcher = {
+        let state = api_state.lock().await;
+        state.fetcher.clone()
+    };
+
+    let fetcher = fetcher.ok_or(
+        "API key required for full history import. Add one in Settings > Advanced."
+    )?;
+
+    // Update static data first
+    if let Err(e) = fetcher.update_static_data().await {
+        tracing::warn!("Failed to update static data: {e}");
+    }
+
+    // Full paginated import
+    let count = fetcher
+        .full_import(&puuid, max)
+        .await
+        .map_err(|e| safe_err("Full import", e))?;
+
+    // Auto-run pattern analysis after import
+    let matches = db.get_match_history(&puuid, 500, 0).unwrap_or_default();
+    let mut features_extracted = 0;
+    for m in &matches {
+        if db.has_features(&m.match_id, &puuid).unwrap_or(true) {
+            continue;
+        }
+        let match_json = match db.get_match_json(&m.match_id) {
+            Ok(Some(j)) => j, _ => continue,
+        };
+        let timeline_json = match db.get_timeline_json(&m.match_id) {
+            Ok(Some(j)) => j, _ => continue,
+        };
+        let Ok(match_data) = serde_json::from_str::<riot_api::types::RiotMatch>(&match_json) else { continue };
+        let Ok(timeline) = serde_json::from_str::<riot_api::types::MatchTimeline>(&timeline_json) else { continue };
+        if let Some(features) = analysis::patterns::extract_features(&match_data, &timeline, &puuid) {
+            let fj = serde_json::to_string(&features).unwrap_or_default();
+            let _ = db.store_features(&m.match_id, &puuid, &fj);
+            features_extracted += 1;
+        }
+    }
+
+    // Run pattern detection
+    let patterns = analysis::patterns::detect_patterns(db.inner(), &puuid);
+
+    tracing::info!("Full import: {count} matches, {features_extracted} features, {} patterns", patterns.len());
+
+    Ok(serde_json::json!({
+        "matches_imported": count,
+        "features_extracted": features_extracted,
+        "patterns_detected": patterns.len(),
+    }))
 }
 
 #[tauri::command]
@@ -577,6 +642,7 @@ pub fn run() {
             set_region,
             get_match_history,
             trigger_backfill,
+            import_full_history,
             get_champ_select_session,
             get_draft_recommendations,
             get_champion_pool,

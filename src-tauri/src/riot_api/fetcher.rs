@@ -90,37 +90,68 @@ impl MatchFetcher {
         Ok(())
     }
 
-    /// Background backfill: fetch and store recent matches at low priority
+    /// Quick backfill: fetch recent matches (20-50)
     pub async fn backfill(&self, puuid: &str, max_matches: i32) -> Result<i32> {
         let new_ids = self.get_new_match_ids(puuid, max_matches).await?;
-        let total = new_ids.len() as i32;
+        self.fetch_match_list(&new_ids).await
+    }
 
-        for (i, match_id) in new_ids.iter().enumerate() {
-            // Emit progress to frontend
+    /// Full history import: fetch up to 300 matches with pagination
+    pub async fn full_import(&self, puuid: &str, max_matches: i32) -> Result<i32> {
+        let max = max_matches.min(500);
+
+        let _ = self.app_handle.emit(
+            "import-progress",
+            serde_json::json!({"phase": "fetching_ids", "message": "Fetching match list..."}),
+        );
+
+        // Paginated fetch of all match IDs
+        let all_ids = self.api.get_match_ids_paginated(puuid, max).await?;
+        tracing::info!("Found {} total match IDs, checking for new...", all_ids.len());
+
+        // Filter out already stored
+        let new_ids: Vec<String> = all_ids
+            .into_iter()
+            .filter(|id| !self.db.has_match(id).unwrap_or(true))
+            .collect();
+
+        tracing::info!("{} new matches to fetch", new_ids.len());
+        self.fetch_match_list(&new_ids).await
+    }
+
+    /// Fetch and store a list of matches with progress events
+    async fn fetch_match_list(&self, match_ids: &[String]) -> Result<i32> {
+        let total = match_ids.len() as i32;
+        let mut stored = 0;
+
+        for (i, match_id) in match_ids.iter().enumerate() {
             let _ = self.app_handle.emit(
-                "backfill-progress",
+                "import-progress",
                 serde_json::json!({
+                    "phase": "fetching",
                     "current": i + 1,
                     "total": total,
                     "match_id": match_id,
+                    "message": format!("Fetching match {}/{}", i + 1, total),
                 }),
             );
 
             if let Err(e) = self.fetch_and_store_match(match_id).await {
                 tracing::warn!("Failed to fetch match {match_id}: {e}");
-                // Continue with next match
+            } else {
+                stored += 1;
             }
 
-            // Small delay between fetches to be gentle on the API
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            // Small delay to be gentle on the API
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
 
         let _ = self.app_handle.emit(
-            "backfill-complete",
-            serde_json::json!({ "fetched": total }),
+            "import-complete",
+            serde_json::json!({ "fetched": stored, "total": total }),
         );
 
-        Ok(total)
+        Ok(stored)
     }
 
     /// Fetch Data Dragon champion + item data and store locally

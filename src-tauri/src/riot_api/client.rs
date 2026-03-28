@@ -103,13 +103,40 @@ impl RiotApiClient {
 
     // ── Match V5 endpoints ──────────────────────────────
 
-    /// Get recent match IDs for a player
+    /// Get recent match IDs for a player (max 100 per request)
     pub async fn get_match_ids(&self, puuid: &str, count: i32) -> Result<Vec<String>> {
+        let count = count.min(100);
         let url = format!(
             "https://{}.api.riotgames.com/lol/match/v5/matches/by-puuid/{}/ids?count={}",
             self.region, puuid, count
         );
         self.get(&url).await
+    }
+
+    /// Get match IDs with pagination (for full history import)
+    /// Fetches up to `total` match IDs using `start` offset pagination
+    pub async fn get_match_ids_paginated(&self, puuid: &str, total: i32) -> Result<Vec<String>> {
+        let mut all_ids = Vec::new();
+        let page_size = 100;
+        let mut start = 0;
+
+        while (all_ids.len() as i32) < total {
+            let count = page_size.min(total - all_ids.len() as i32);
+            let url = format!(
+                "https://{}.api.riotgames.com/lol/match/v5/matches/by-puuid/{}/ids?start={}&count={}",
+                self.region, puuid, start, count
+            );
+            let ids: Vec<String> = self.get(&url).await?;
+            let fetched = ids.len();
+            all_ids.extend(ids);
+
+            if fetched < page_size as usize {
+                break; // No more matches available
+            }
+            start += page_size;
+        }
+
+        Ok(all_ids)
     }
 
     /// Get full match data (parsed + raw JSON)
