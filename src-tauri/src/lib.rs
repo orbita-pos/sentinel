@@ -361,49 +361,72 @@ fn get_post_game_analysis(
         .ok_or("Match not found")?;
     let timeline_json = db.get_timeline_json(&match_id).map_err(|e| safe_err("Get timeline", e))?;
 
-    let match_data: riot_api::types::RiotMatch = serde_json::from_str(&match_json)
-        .map_err(|e| safe_err("Parse match", e))?;
+    // Try to parse as Riot API format first
+    if let Ok(match_data) = serde_json::from_str::<riot_api::types::RiotMatch>(&match_json) {
+        // If we have timeline, do full analysis with key moments
+        if let Some(tl_json) = &timeline_json {
+            if let Ok(timeline) = serde_json::from_str::<riot_api::types::MatchTimeline>(tl_json) {
+                if !db.has_features(&match_id, &puuid).unwrap_or(true) {
+                    if let Some(features) = analysis::patterns::extract_features(&match_data, &timeline, &puuid) {
+                        let fj = serde_json::to_string(&features).unwrap_or_default();
+                        let _ = db.store_features(&match_id, &puuid, &fj);
+                    }
+                }
 
-    // If we have timeline, do full analysis with key moments
-    if let Some(tl_json) = timeline_json {
-        if let Ok(timeline) = serde_json::from_str::<riot_api::types::MatchTimeline>(&tl_json) {
-            if !db.has_features(&match_id, &puuid).unwrap_or(true) {
-                if let Some(features) = analysis::patterns::extract_features(&match_data, &timeline, &puuid) {
-                    let fj = serde_json::to_string(&features).unwrap_or_default();
-                    let _ = db.store_features(&match_id, &puuid, &fj);
+                if let Some(analysis) = analysis::post_game::analyze(&match_data, &timeline, &puuid, db.inner()) {
+                    let analysis_json = serde_json::to_string(&analysis).unwrap_or_default();
+                    let _ = db.store_post_game_analysis(&match_id, &puuid, &analysis_json);
+                    return serde_json::to_value(&analysis).map_err(|e| safe_err("Serialize analysis", e));
                 }
             }
-
-            if let Some(analysis) = analysis::post_game::analyze(&match_data, &timeline, &puuid, db.inner()) {
-                let analysis_json = serde_json::to_string(&analysis).unwrap_or_default();
-                let _ = db.store_post_game_analysis(&match_id, &puuid, &analysis_json);
-                return serde_json::to_value(&analysis).map_err(|e| safe_err("Serialize analysis", e));
-            }
         }
+
+        // Riot API match but no timeline
+        let participant = match_data.info.participants.iter()
+            .find(|p| p.puuid == puuid)
+            .ok_or("Player not found in match")?;
+
+        let duration_min = match_data.info.game_duration / 60;
+        let duration_sec = match_data.info.game_duration % 60;
+
+        return Ok(serde_json::json!({
+            "match_id": match_id,
+            "outcome": if participant.win { "Victory" } else { "Defeat" },
+            "duration": format!("{duration_min}:{duration_sec:02}"),
+            "champion_name": participant.champion_name,
+            "kills": participant.kills,
+            "deaths": participant.deaths,
+            "assists": participant.assists,
+            "cs": participant.total_minions_killed,
+            "key_moments": [],
+            "pattern_matches": [],
+            "no_timeline": timeline_json.is_none(),
+        }));
     }
 
-    // No timeline: return basic stats from match data
-    let participant = match_data.info.participants.iter()
-        .find(|p| p.puuid == puuid)
-        .ok_or("Player not found in match")?;
+    // LCU format: extract basic stats from match_participants table instead
+    let history = db.get_match_history(&puuid, 1, 0).map_err(|e| safe_err("Get history", e))?;
+    let m = history.iter().find(|h| h.match_id == match_id);
 
-    let duration_min = match_data.info.game_duration / 60;
-    let duration_sec = match_data.info.game_duration % 60;
-
-    let basic = serde_json::json!({
-        "match_id": match_id,
-        "outcome": if participant.win { "Victory" } else { "Defeat" },
-        "duration": format!("{duration_min}:{duration_sec:02}"),
-        "champion_name": participant.champion_name,
-        "kills": participant.kills,
-        "deaths": participant.deaths,
-        "assists": participant.assists,
-        "cs": participant.total_minions_killed,
-        "key_moments": [],
-        "pattern_matches": [],
-        "no_timeline": true,
-    });
-    Ok(basic)
+    if let Some(m) = m {
+        let duration_min = m.game_duration / 60;
+        let duration_sec = m.game_duration % 60;
+        Ok(serde_json::json!({
+            "match_id": match_id,
+            "outcome": if m.win { "Victory" } else { "Defeat" },
+            "duration": format!("{duration_min}:{duration_sec:02}"),
+            "champion_name": m.champion_name,
+            "kills": m.kills,
+            "deaths": m.deaths,
+            "assists": m.assists,
+            "cs": m.cs,
+            "key_moments": [],
+            "pattern_matches": [],
+            "no_timeline": true,
+        }))
+    } else {
+        Err("Could not load match data".to_string())
+    }
 }
 
 #[tauri::command]
