@@ -3,7 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { currentPatch } from "../../stores/champions.js";
 
-  let { state }: { state: LiveGameState } = $props();
+  let { gameState }: { gameState: LiveGameState } = $props();
   let patch = $derived($currentPatch);
 
   // Backend intelligence response
@@ -19,7 +19,7 @@
   // Fetch OP.GG build once per champion (yours + all enemies)
   let lastChampFetched = $state("");
   $effect(() => {
-    const me = state.my_team.find(p => p.is_local_player);
+    const me = gameState.my_team.find(p => p.is_local_player);
     if (!me || me.champion === lastChampFetched || opggLoading) return;
     lastChampFetched = me.champion;
     opggLoading = true;
@@ -29,9 +29,9 @@
       .finally(() => { opggLoading = false; });
 
     // Fetch enemy builds (Phase C) -- [S6 fix] staggered 500ms apart
-    if (!enemyBuildsFetched && state.enemy_team.length > 0) {
+    if (!enemyBuildsFetched && gameState.enemy_team.length > 0) {
       enemyBuildsFetched = true;
-      const enemies = state.enemy_team.filter(e => e.champion && !enemyBuilds[e.champion]);
+      const enemies = gameState.enemy_team.filter(e => e.champion && !enemyBuilds[e.champion]);
       enemies.forEach((enemy, i) => {
         setTimeout(() => {
           invoke("get_opgg_build", { champion: enemy.champion, position: "all" })
@@ -72,20 +72,20 @@
 
   // Fetch intelligence from Rust backend every 5 seconds
   $effect(() => {
-    const now = state.game_time;
+    const now = gameState.game_time;
     if (now - lastFetchTime < 5) return;
     lastFetchTime = now;
 
-    const me = state.my_team.find(p => p.is_local_player);
+    const me = gameState.my_team.find(p => p.is_local_player);
     if (!me) return;
 
     invoke("get_item_intelligence", {
       myChampion: me.champion,
       myItems: me.items.map(i => i.item_id).filter(id => id > 0),
-      myGold: state.active_player?.current_gold ?? 0,
-      enemyChampions: state.enemy_team.map(p => p.champion),
-      enemyItems: state.enemy_team.map(p => p.items.map(i => i.item_id).filter(id => id > 0)),
-      enemyStats: state.enemy_team.map(p => [p.kills, p.deaths, p.items.reduce((s: number, i: any) => s + i.price, 0)]),
+      myGold: gameState.active_player?.current_gold ?? 0,
+      enemyChampions: gameState.enemy_team.map(p => p.champion),
+      enemyItems: gameState.enemy_team.map(p => p.items.map(i => i.item_id).filter(id => id > 0)),
+      enemyStats: gameState.enemy_team.map(p => [p.kills, p.deaths, p.items.reduce((s: number, i: any) => s + i.price, 0)]),
     }).then((result: any) => {
       intel = result;
     }).catch(() => {
@@ -94,7 +94,7 @@
     });
   });
 
-  let me = $derived(state.my_team.find(p => p.is_local_player));
+  let me = $derived(gameState.my_team.find(p => p.is_local_player));
 
   function champImg(n: string) { return `https://ddragon.leagueoflegends.com/cdn/${patch}/img/champion/${n}.png`; }
   function itemImg(id: number) { return `https://ddragon.leagueoflegends.com/cdn/${patch}/img/item/${id}.png`; }
@@ -142,7 +142,7 @@
           </div>
         </div>
         <div class="text-right">
-          <div class="text-lg font-bold" style="color: var(--accent-gold)">{Math.floor(state.active_player.current_gold)}g</div>
+          <div class="text-lg font-bold" style="color: var(--accent-gold)">{Math.floor(gameState.active_player.current_gold)}g</div>
           <div class="text-[9px]" style="color: var(--text-muted)">{me.cs} CS | {me.ward_score.toFixed(0)} vision</div>
         </div>
       </div>
@@ -439,7 +439,7 @@
     <!-- ═══ ON NEXT BACK ═══ -->
     {#if intel.on_next_back?.length > 0}
       <div class="rounded-xl border p-4" style="background: var(--bg-secondary); border-color: var(--border)">
-        <p class="mb-2 text-[10px] font-bold uppercase tracking-wide" style="color: var(--accent-gold)">On Your Next Back ({Math.floor(state.active_player.current_gold)}g)</p>
+        <p class="mb-2 text-[10px] font-bold uppercase tracking-wide" style="color: var(--accent-gold)">On Your Next Back ({Math.floor(gameState.active_player.current_gold)}g)</p>
         <div class="flex flex-wrap gap-2">
           {#each intel.on_next_back as b}
             <div class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5" style="background: var(--bg-tertiary); {b.is_complete ? 'border: 1px solid var(--accent-green)' : ''}">
@@ -473,7 +473,7 @@
         </div>
         <div class="space-y-1.5">
           {#each intel.threats as t}
-            {@const enemyPlayer = state.enemy_team.find(e => e.champion === t.champion)}
+            {@const enemyPlayer = gameState.enemy_team.find(e => e.champion === t.champion)}
             {@const nextItem = enemyPlayer ? predictNextItem(enemyPlayer) : null}
             {@const enemyBuild = enemyBuilds[t.champion]}
             <div class="rounded-lg px-3 py-2" style="background: {threatBg[t.threat_level] ?? 'var(--bg-tertiary)'}">
@@ -525,7 +525,7 @@
     {/if}
   {:else}
     <div class="flex h-32 items-center justify-center rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
-      <p class="text-xs" style="color: var(--text-muted)">Analyzing game state...</p>
+      <p class="text-xs" style="color: var(--text-muted)">Analyzing game gameState...</p>
     </div>
   {/if}
 </div>

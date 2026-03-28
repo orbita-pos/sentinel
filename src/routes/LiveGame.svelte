@@ -268,7 +268,7 @@
     {:else}
       <!-- Player Advice Tab -->
       {#if state}
-        <PlayerTab {state} />
+        <PlayerTab gameState={state} />
       {:else}
         <p class="text-sm" style="color: var(--text-muted)">Loading player data...</p>
       {/if}
