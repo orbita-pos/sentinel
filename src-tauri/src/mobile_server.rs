@@ -19,17 +19,26 @@ pub struct MobileServerState {
     pub rate_limits: Mutex<HashMap<String, Instant>>,
 }
 
-/// Generate a random 8-character alphanumeric token
+/// Generate a 16-character token from multiple entropy sources
+/// [S1 fix] Not predictable from system clock alone
 fn generate_token() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let chars = b"abcdefghjkmnpqrstuvwxyz23456789"; // no ambiguous chars
-    (0..8)
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h1 = DefaultHasher::new();
+    std::time::SystemTime::now().hash(&mut h1);
+    std::process::id().hash(&mut h1);
+    std::thread::current().id().hash(&mut h1);
+    let a = h1.finish();
+    // Second hash with different seed
+    let mut h2 = DefaultHasher::new();
+    (a ^ 0xDEADBEEF_CAFEBABE).hash(&mut h2);
+    std::time::Instant::now().hash(&mut h2);
+    let b = h2.finish();
+    let chars = b"abcdefghjkmnpqrstuvwxyz23456789";
+    (0..16)
         .map(|i| {
-            let idx = ((seed >> (i * 5)) as usize) % chars.len();
+            let src = if i < 8 { a } else { b };
+            let idx = ((src >> ((i % 8) * 5)) as usize) % chars.len();
             chars[idx] as char
         })
         .collect()
@@ -193,7 +202,7 @@ function fG(g){{return g>=1000?(g/1000).toFixed(1)+'k':g}}
 
 function render(d){{
   const app=$('app');
-  app.innerHTML='';
+  while(app.firstChild)app.removeChild(app.firstChild);
 
   if(!d.game_time){{
     const w=el('div','wait');

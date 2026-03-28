@@ -40,6 +40,17 @@ fn validate_puuid(puuid: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// [S3] Validate champion name (alphanumeric, reasonable length)
+fn validate_champion_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.len() > 30 {
+        return Err("Invalid champion name".to_string());
+    }
+    if !name.chars().all(|c| c.is_alphanumeric()) {
+        return Err("Invalid champion name format".to_string());
+    }
+    Ok(())
+}
+
 /// [H2] Validate region against allowlist
 fn validate_region(region: &str) -> Result<(), String> {
     if !VALID_REGIONS.contains(&region) {
@@ -369,10 +380,7 @@ async fn get_opgg_build(
     position: String,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    // [H3] Validate champion name
-    if champion.is_empty() || champion.len() > 30 || !champion.chars().all(|c| c.is_alphanumeric()) {
-        return Err("Invalid champion name".to_string());
-    }
+    validate_champion_name(&champion)?;
     // Verify champion exists in DB
     let tags = db.get_champion_tags(&champion).map_err(|e| safe_err("DB lookup", e))?;
     if tags.is_empty() {
@@ -394,10 +402,7 @@ async fn import_runes(
     lcu: tauri::State<'_, Arc<LcuManager>>,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    // Validate
-    if champion.is_empty() || champion.len() > 30 {
-        return Err("Invalid champion name".to_string());
-    }
+    validate_champion_name(&champion)?;
 
     // Get LCU client
     let client = lcu.get_client().ok_or("Not connected to League client")?;
@@ -412,8 +417,10 @@ async fn import_runes(
     }
 
     // Convert rune tree names to IDs
-    let primary_id = lcu::runes::tree_id(&build.runes.primary_tree);
-    let secondary_id = lcu::runes::tree_id(&build.runes.secondary_tree);
+    let primary_id = lcu::runes::tree_id(&build.runes.primary_tree)
+        .ok_or_else(|| format!("Unknown primary rune tree: {}", build.runes.primary_tree))?;
+    let secondary_id = lcu::runes::tree_id(&build.runes.secondary_tree)
+        .ok_or_else(|| format!("Unknown secondary rune tree: {}", build.runes.secondary_tree))?;
 
     // Convert rune names to IDs
     let primary_rune_ids = lcu::runes::resolve_rune_ids(&build.runes.primary_runes);
@@ -452,9 +459,7 @@ async fn get_champion_matchups(
     position: String,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    if champion.is_empty() || champion.len() > 30 {
-        return Err("Invalid champion name".to_string());
-    }
+    validate_champion_name(&champion)?;
     let tags = db.get_champion_tags(&champion).map_err(|e| safe_err("DB", e))?;
     if tags.is_empty() { return Ok(serde_json::json!({})); }
 

@@ -28,18 +28,20 @@
       .catch((e: any) => console.warn("OP.GG build fetch:", e))
       .finally(() => { opggLoading = false; });
 
-    // Fetch enemy builds (Phase C)
+    // Fetch enemy builds (Phase C) -- [S6 fix] staggered 500ms apart
     if (!enemyBuildsFetched && state.enemy_team.length > 0) {
       enemyBuildsFetched = true;
-      for (const enemy of state.enemy_team) {
-        if (!enemy.champion || enemyBuilds[enemy.champion]) continue;
-        invoke("get_opgg_build", { champion: enemy.champion, position: "all" })
-          .then((result: any) => {
-            enemyBuilds[enemy.champion] = result;
-            enemyBuilds = enemyBuilds; // trigger reactivity
-          })
-          .catch(() => {});
-      }
+      const enemies = state.enemy_team.filter(e => e.champion && !enemyBuilds[e.champion]);
+      enemies.forEach((enemy, i) => {
+        setTimeout(() => {
+          invoke("get_opgg_build", { champion: enemy.champion, position: "all" })
+            .then((result: any) => {
+              enemyBuilds[enemy.champion] = result;
+              enemyBuilds = enemyBuilds;
+            })
+            .catch(() => {});
+        }, i * 500);
+      });
     }
   });
 

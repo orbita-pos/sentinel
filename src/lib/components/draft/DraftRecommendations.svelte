@@ -45,12 +45,15 @@
     matchupsLoading = true;
 
     const enemies = session.their_team.filter(p => p.champion_id > 0);
-    for (const enemy of enemies) {
+    for (let idx = 0; idx < enemies.length; idx++) {
+      const enemy = enemies[idx];
       const champName = getChampionName(map, enemy.champion_id);
       if (!champName || champName.startsWith("Champion") || enemyMatchups[champName]) continue;
 
+      // [S6 fix] Stagger requests 500ms apart
+      if (idx > 0) await new Promise(r => setTimeout(r, 500));
+
       try {
-        // Get the champion key (Data Dragon key) for OP.GG
         const info = map[enemy.champion_id];
         if (!info?.key) continue;
 

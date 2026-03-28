@@ -68,7 +68,10 @@ impl LcuClient {
         Ok(GameFlowPhase::from_str_lossy(&phase_str))
     }
 
-    /// Make a POST request to an LCU endpoint
+    // [S2] These HTTP methods are intentionally private.
+    // Only used by rune page management methods below.
+    // Do NOT make public -- prevents arbitrary LCU API access.
+
     async fn post_json(&self, endpoint: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
         let url = format!("{}{}", self.base_url, endpoint);
         let resp = self.client.post(&url).json(body).send().await.context("LCU POST failed")?;

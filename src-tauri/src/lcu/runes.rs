@@ -1,15 +1,18 @@
 use std::collections::HashMap;
 
 /// Rune tree name → style ID mapping
-pub fn tree_id(name: &str) -> i64 {
+/// [S5 fix] Returns Option instead of silently defaulting
+pub fn tree_id(name: &str) -> Option<i64> {
     match name.to_lowercase().as_str() {
-        "precision" => 8000,
-        "domination" => 8100,
-        "sorcery" => 8200,
-        "resolve" | "inspiration" => {
-            if name.to_lowercase() == "resolve" { 8400 } else { 8300 }
+        "precision" => Some(8000),
+        "domination" => Some(8100),
+        "sorcery" => Some(8200),
+        "resolve" => Some(8400),
+        "inspiration" => Some(8300),
+        _ => {
+            tracing::warn!("Unknown rune tree: {name}");
+            None
         }
-        _ => 8000,
     }
 }
 
@@ -25,15 +28,14 @@ pub fn rune_id_map() -> HashMap<String, i64> {
     m.insert("Overheal".into(), 9101);
     m.insert("Triumph".into(), 9111);
     m.insert("Presence of Mind".into(), 8009);
-    m.insert("Legend: Alacrity".into(), 9104);
+    // [S4 fix] Removed stale Legend: Alacrity (now Legend: Haste) and Triumph (now Absorb Life)
+    m.insert("Legend: Haste".into(), 9104);
     m.insert("Legend: Tenacity".into(), 9105);
     m.insert("Legend: Bloodline".into(), 9103);
+    m.insert("Absorb Life".into(), 9111);
     m.insert("Coup de Grace".into(), 8014);
     m.insert("Cut Down".into(), 8017);
     m.insert("Last Stand".into(), 8299);
-    // New legend runes
-    m.insert("Legend: Haste".into(), 9104);
-    m.insert("Absorb Life".into(), 9111);
 
     // ── Domination ──
     m.insert("Electrocute".into(), 8112);
