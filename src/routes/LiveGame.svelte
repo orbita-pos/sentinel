@@ -8,7 +8,11 @@
   import { invoke } from "@tauri-apps/api/core";
 
   let state = $derived($liveGameState);
-  let activeTab: "overview" | "player" = $state("overview");
+  let activeTab = $state("overview");
+
+  function setTab(tab: string) {
+    activeTab = tab;
+  }
 
   let mobileUrl = $state("");
   let showMobileQR = $state(false);
@@ -145,12 +149,12 @@
     <!-- Tab Buttons -->
     <div class="mb-4 flex items-center gap-2">
       <button
-        onclick={() => activeTab = "overview"}
+        onclick={() => setTab("overview")}
         class="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
         style="background: {activeTab === 'overview' ? 'var(--accent-blue)' : 'var(--bg-tertiary)'}; color: {activeTab === 'overview' ? 'white' : 'var(--text-secondary)'}"
       >Overview</button>
       <button
-        onclick={() => activeTab = "player"}
+        onclick={() => setTab("player")}
         class="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
         style="background: {activeTab === 'player' ? 'var(--accent-purple)' : 'var(--bg-tertiary)'}; color: {activeTab === 'player' ? 'white' : 'var(--text-secondary)'}"
       >Player Advice</button>
@@ -263,7 +267,11 @@
       </div>
     {:else}
       <!-- Player Advice Tab -->
-      <PlayerTab {state} />
+      {#if state}
+        <PlayerTab {state} />
+      {:else}
+        <p class="text-sm" style="color: var(--text-muted)">Loading player data...</p>
+      {/if}
     {/if}
   {/if}
 </div>
