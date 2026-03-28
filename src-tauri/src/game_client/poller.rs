@@ -119,13 +119,15 @@ impl GameClientPoller {
     }
 
     async fn poll_once(&mut self) -> Result<()> {
-        let (players_res, events_res, stats_res) = tokio::join!(
+        let (players_res, active_res, events_res, stats_res) = tokio::join!(
             self.fetch::<Vec<AllPlayer>>("/playerlist"),
+            self.fetch::<ActivePlayer>("/activeplayer"),
             self.fetch::<EventData>("/eventdata"),
             self.fetch::<GameStats>("/gamestats"),
         );
 
         let players = players_res?;
+        let active = active_res.unwrap_or_default();
         let events = events_res.unwrap_or_default();
         let stats = stats_res?;
 
@@ -139,7 +141,7 @@ impl GameClientPoller {
         // Update composite state
         {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            state.update(&players, &events, &stats, &self.local_player_name);
+            state.update(&players, &active, &events, &stats, &self.local_player_name);
         }
 
         // ── Record snapshot to DB every SNAPSHOT_INTERVAL seconds ──

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::types::{AllPlayer, EventData, GameStats};
+use super::types::{ActivePlayer, AllPlayer, EventData, GameStats};
 
 /// Composite live game state pushed to the frontend every tick
 #[derive(Debug, Clone, Serialize, Default)]
@@ -14,6 +14,17 @@ pub struct LiveGameState {
     pub recent_events: Vec<LiveEvent>,
     pub power_spikes: Vec<PowerSpike>,
     pub objective_events: Vec<LiveEvent>,
+    pub active_player: ActivePlayerState,
+}
+
+/// Active player extended info (runes, abilities, stats)
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ActivePlayerState {
+    pub champion: String,
+    pub level: i64,
+    pub current_gold: f64,
+    pub runes: serde_json::Value,
+    pub champion_stats: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -69,6 +80,7 @@ impl LiveGameState {
     pub fn update(
         &mut self,
         players: &[AllPlayer],
+        active: &ActivePlayer,
         events: &EventData,
         stats: &GameStats,
         local_player_name: &str,
@@ -76,6 +88,15 @@ impl LiveGameState {
         let prev_items = self.collect_item_sets();
 
         self.game_time = stats.game_time;
+
+        // Update active player state
+        self.active_player = ActivePlayerState {
+            champion: local_player_name.to_string(),
+            level: active.level,
+            current_gold: active.current_gold,
+            runes: active.champion_stats.clone(),
+            champion_stats: active.champion_stats.clone(),
+        };
         self.game_mode = stats.game_mode.clone();
 
         // Determine local player's team

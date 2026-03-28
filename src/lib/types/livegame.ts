@@ -8,6 +8,15 @@ export interface LiveGameState {
   recent_events: LiveEvent[];
   power_spikes: PowerSpike[];
   objective_events: LiveEvent[];
+  active_player: ActivePlayerState;
+}
+
+export interface ActivePlayerState {
+  champion: string;
+  level: number;
+  current_gold: number;
+  runes: any;
+  champion_stats: any;
 }
 
 export interface LivePlayerState {

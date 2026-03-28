@@ -4,8 +4,10 @@
   import TeamScoreboard from "../lib/components/live/TeamScoreboard.svelte";
   import PowerSpikeAlert from "../lib/components/live/PowerSpikeAlert.svelte";
   import ObjectiveTimers from "../lib/components/live/ObjectiveTimers.svelte";
+  import PlayerTab from "../lib/components/live/PlayerTab.svelte";
 
   let state = $derived($liveGameState);
+  let activeTab: "overview" | "player" = $state("overview");
 
   // Community Dragon CDN for objective icons
   const CDN = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-match-history/global/default";
@@ -123,70 +125,89 @@
       </div>
     </div>
 
-    <!-- Gold diff graph -->
-    <div class="mb-4">
-      <GoldDiffGraph history={state.gold_diff_history} currentDiff={state.team_gold_diff} />
+    <!-- Tab Buttons -->
+    <div class="mb-4 flex gap-2">
+      <button
+        onclick={() => activeTab = "overview"}
+        class="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+        style="background: {activeTab === 'overview' ? 'var(--accent-blue)' : 'var(--bg-tertiary)'}; color: {activeTab === 'overview' ? 'white' : 'var(--text-secondary)'}"
+      >Overview</button>
+      <button
+        onclick={() => activeTab = "player"}
+        class="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+        style="background: {activeTab === 'player' ? 'var(--accent-purple)' : 'var(--bg-tertiary)'}; color: {activeTab === 'player' ? 'white' : 'var(--text-secondary)'}"
+      >Player Advice</button>
     </div>
 
-    <!-- Scoreboards -->
-    <div class="mb-4 grid grid-cols-2 gap-4">
-      <TeamScoreboard players={state.my_team} label="Your Team" color="var(--accent-blue)" />
-      <TeamScoreboard players={state.enemy_team} label="Enemy Team" color="var(--accent-red)" />
-    </div>
+    {#if activeTab === "overview"}
+      <!-- Gold diff graph -->
+      <div class="mb-4">
+        <GoldDiffGraph history={state.gold_diff_history} currentDiff={state.team_gold_diff} />
+      </div>
 
-    <!-- Bottom: Objectives + Events -->
-    <div class="grid grid-cols-2 gap-4">
-      <ObjectiveTimers events={state.objective_events} gameTime={state.game_time} />
+      <!-- Scoreboards -->
+      <div class="mb-4 grid grid-cols-2 gap-4">
+        <TeamScoreboard players={state.my_team} label="Your Team" color="var(--accent-blue)" />
+        <TeamScoreboard players={state.enemy_team} label="Enemy Team" color="var(--accent-red)" />
+      </div>
 
-      <!-- Recent Events -->
-      <div class="rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
-        <div class="border-b px-4 py-2.5" style="border-color: var(--border)">
-          <span class="text-xs font-bold uppercase tracking-wide" style="color: var(--text-muted)">Recent Events</span>
-        </div>
-        <div class="p-3">
-          {#if state.recent_events.length === 0}
-            <div class="flex h-20 items-center justify-center">
-              <p class="text-xs" style="color: var(--text-muted)">No notable events yet</p>
-            </div>
-          {:else}
-            <div class="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
-              {#each state.recent_events.slice(-10).reverse() as event}
-                {@const isKill = event.event_name === "ChampionKill"}
-                {@const isMulti = event.event_name === "Multikill"}
-                {@const isAce = event.event_name === "Ace"}
-                {@const objImg = eventImg[event.event_name]}
-                <div class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5" style="background: var(--bg-tertiary)">
-                  {#if objImg}
-                    <img src={objImg} alt={event.event_name} class="h-6 w-6 shrink-0" />
-                  {:else if isKill}
-                    <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded" style="background: var(--bg-primary)">
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="2.5">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </div>
-                  {:else if isMulti || isAce}
-                    <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded" style="background: {isAce ? 'var(--accent-gold)' : 'var(--accent-purple)'}">
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="white">
-                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                      </svg>
-                    </div>
-                  {:else}
-                    <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded" style="background: var(--bg-primary)">
-                      <div class="h-2 w-2 rounded-full" style="background: var(--text-muted)"></div>
-                    </div>
-                  {/if}
-                  <span
-                    class="flex-1 text-xs"
-                    style="color: {isAce ? 'var(--accent-gold)' : isMulti ? 'var(--accent-purple)' : 'var(--text-secondary)'}"
-                  >
-                    {event.description}
-                  </span>
-                </div>
-              {/each}
-            </div>
-          {/if}
+      <!-- Bottom: Objectives + Events -->
+      <div class="grid grid-cols-2 gap-4">
+        <ObjectiveTimers events={state.objective_events} gameTime={state.game_time} />
+
+        <!-- Recent Events -->
+        <div class="rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
+          <div class="border-b px-4 py-2.5" style="border-color: var(--border)">
+            <span class="text-xs font-bold uppercase tracking-wide" style="color: var(--text-muted)">Recent Events</span>
+          </div>
+          <div class="p-3">
+            {#if state.recent_events.length === 0}
+              <div class="flex h-20 items-center justify-center">
+                <p class="text-xs" style="color: var(--text-muted)">No notable events yet</p>
+              </div>
+            {:else}
+              <div class="flex flex-col gap-1.5 max-h-48 overflow-y-auto">
+                {#each state.recent_events.slice(-10).reverse() as event}
+                  {@const isKill = event.event_name === "ChampionKill"}
+                  {@const isMulti = event.event_name === "Multikill"}
+                  {@const isAce = event.event_name === "Ace"}
+                  {@const objImg = eventImg[event.event_name]}
+                  <div class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5" style="background: var(--bg-tertiary)">
+                    {#if objImg}
+                      <img src={objImg} alt={event.event_name} class="h-6 w-6 shrink-0" />
+                    {:else if isKill}
+                      <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded" style="background: var(--bg-primary)">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="2.5">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </div>
+                    {:else if isMulti || isAce}
+                      <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded" style="background: {isAce ? 'var(--accent-gold)' : 'var(--accent-purple)'}">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="white">
+                          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                        </svg>
+                      </div>
+                    {:else}
+                      <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded" style="background: var(--bg-primary)">
+                        <div class="h-2 w-2 rounded-full" style="background: var(--text-muted)"></div>
+                      </div>
+                    {/if}
+                    <span
+                      class="flex-1 text-xs"
+                      style="color: {isAce ? 'var(--accent-gold)' : isMulti ? 'var(--accent-purple)' : 'var(--text-secondary)'}"
+                    >
+                      {event.description}
+                    </span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
         </div>
       </div>
-    </div>
+    {:else}
+      <!-- Player Advice Tab -->
+      <PlayerTab {state} />
+    {/if}
   {/if}
 </div>
