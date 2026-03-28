@@ -174,6 +174,130 @@ fn get_champion_pool(
     serde_json::to_value(&pool).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_post_game_analysis(
+    match_id: String,
+    puuid: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    // Check for cached analysis
+    if let Ok(Some(cached)) = db.get_post_game_analysis(&match_id) {
+        return serde_json::from_str(&cached).map_err(|e| e.to_string());
+    }
+
+    // Generate analysis from stored data
+    let match_json = db.get_match_json(&match_id).map_err(|e| e.to_string())?
+        .ok_or("Match not found")?;
+    let timeline_json = db.get_timeline_json(&match_id).map_err(|e| e.to_string())?
+        .ok_or("Timeline not found")?;
+
+    let match_data: riot_api::types::RiotMatch = serde_json::from_str(&match_json).map_err(|e| e.to_string())?;
+    let timeline: riot_api::types::MatchTimeline = serde_json::from_str(&timeline_json).map_err(|e| e.to_string())?;
+
+    // Extract features if not already done
+    if !db.has_features(&match_id, &puuid).unwrap_or(true) {
+        if let Some(features) = analysis::patterns::extract_features(&match_data, &timeline, &puuid) {
+            let features_json = serde_json::to_string(&features).unwrap_or_default();
+            let _ = db.store_features(&match_id, &puuid, &features_json);
+        }
+    }
+
+    let analysis = analysis::post_game::analyze(&match_data, &timeline, &puuid, db.inner())
+        .ok_or("Failed to generate analysis")?;
+
+    // Cache it
+    let analysis_json = serde_json::to_string(&analysis).unwrap_or_default();
+    let _ = db.store_post_game_analysis(&match_id, &puuid, &analysis_json);
+
+    serde_json::to_value(&analysis).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_detected_patterns(
+    puuid: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    let patterns = db.get_patterns(&puuid).map_err(|e| e.to_string())?;
+    Ok(serde_json::Value::Array(patterns))
+}
+
+#[tauri::command]
+fn run_pattern_analysis(
+    puuid: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    // First, extract features for all matches that don't have them
+    let matches = db.get_match_history(&puuid, 200, 0).map_err(|e| e.to_string())?;
+    let mut extracted = 0;
+
+    for m in &matches {
+        if db.has_features(&m.match_id, &puuid).unwrap_or(true) {
+            continue;
+        }
+        let match_json = match db.get_match_json(&m.match_id) {
+            Ok(Some(j)) => j,
+            _ => continue,
+        };
+        let timeline_json = match db.get_timeline_json(&m.match_id) {
+            Ok(Some(j)) => j,
+            _ => continue,
+        };
+        let match_data: riot_api::types::RiotMatch = match serde_json::from_str(&match_json) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let timeline: riot_api::types::MatchTimeline = match serde_json::from_str(&timeline_json) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        if let Some(features) = analysis::patterns::extract_features(&match_data, &timeline, &puuid) {
+            let fj = serde_json::to_string(&features).unwrap_or_default();
+            let _ = db.store_features(&m.match_id, &puuid, &fj);
+            extracted += 1;
+        }
+    }
+
+    // Run pattern detection
+    let patterns = analysis::patterns::detect_patterns(db.inner(), &puuid);
+
+    Ok(serde_json::json!({
+        "features_extracted": extracted,
+        "patterns_detected": patterns.len(),
+        "patterns": patterns,
+    }))
+}
+
+#[tauri::command]
+fn get_weekly_metrics(
+    puuid: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    let metrics = analysis::improvement::compute_metrics(db.inner(), &puuid);
+    serde_json::to_value(&metrics).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_improvement_goals(
+    puuid: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    let goals = db.get_goals(&puuid).map_err(|e| e.to_string())?;
+    Ok(serde_json::Value::Array(goals))
+}
+
+#[tauri::command]
+fn create_improvement_goal(
+    puuid: String,
+    name: String,
+    metric_key: String,
+    target_value: Option<f64>,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    let id = db.create_goal(&puuid, &name, None, &metric_key, target_value, None)
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "id": id }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -314,6 +438,12 @@ pub fn run() {
             get_draft_recommendations,
             get_champion_pool,
             get_live_game_state,
+            get_post_game_analysis,
+            get_detected_patterns,
+            run_pattern_analysis,
+            get_weekly_metrics,
+            get_improvement_goals,
+            create_improvement_goal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sentinel");

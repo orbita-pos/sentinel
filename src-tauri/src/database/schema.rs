@@ -119,3 +119,78 @@ CREATE TABLE IF NOT EXISTS champion_mastery (
     PRIMARY KEY (puuid, champion_id)
 );
 ";
+
+/// Migration 005: Pattern engine, post-game analysis, improvement tracking
+pub const MIGRATION_005_PATTERNS: &str = "
+CREATE TABLE IF NOT EXISTS game_features (
+    match_id            TEXT NOT NULL,
+    puuid               TEXT NOT NULL,
+    champion_id         INTEGER NOT NULL,
+    role                TEXT,
+    win                 INTEGER NOT NULL,
+    game_duration_min   REAL NOT NULL,
+    cs_at_10            INTEGER,
+    cs_at_15            INTEGER,
+    gold_diff_at_10     INTEGER,
+    gold_diff_at_15     INTEGER,
+    gold_diff_at_20     INTEGER,
+    deaths_before_15    INTEGER,
+    deaths_after_25     INTEGER,
+    vision_score_per_min REAL,
+    kill_participation  REAL,
+    had_early_lead      INTEGER,
+    threw_lead          INTEGER,
+    features_json       TEXT NOT NULL,
+    computed_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (match_id, puuid)
+);
+
+CREATE TABLE IF NOT EXISTS detected_patterns (
+    id                  TEXT PRIMARY KEY,
+    puuid               TEXT NOT NULL,
+    category            TEXT NOT NULL,
+    description         TEXT NOT NULL,
+    confidence          REAL NOT NULL,
+    sample_size         INTEGER NOT NULL,
+    impact_wr_change    REAL,
+    impact_games_pct    REAL,
+    trend               TEXT NOT NULL DEFAULT 'Stable',
+    evidence_json       TEXT NOT NULL DEFAULT '[]',
+    first_detected      TEXT NOT NULL DEFAULT (datetime('now')),
+    last_updated        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_patterns_puuid ON detected_patterns(puuid);
+CREATE INDEX IF NOT EXISTS idx_game_features_puuid ON game_features(puuid);
+
+CREATE TABLE IF NOT EXISTS post_game_analyses (
+    match_id            TEXT PRIMARY KEY,
+    puuid               TEXT NOT NULL,
+    analysis_json       TEXT NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS improvement_goals (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    puuid               TEXT NOT NULL,
+    name                TEXT NOT NULL,
+    description         TEXT,
+    metric_key          TEXT NOT NULL,
+    target_value        REAL,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    linked_pattern_id   TEXT,
+    active              INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS improvement_snapshots (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    puuid               TEXT NOT NULL,
+    metric_key          TEXT NOT NULL,
+    value               REAL NOT NULL,
+    match_count         INTEGER NOT NULL,
+    snapshot_date       TEXT NOT NULL,
+    UNIQUE(puuid, metric_key, snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_puuid ON improvement_snapshots(puuid, metric_key, snapshot_date);
+";

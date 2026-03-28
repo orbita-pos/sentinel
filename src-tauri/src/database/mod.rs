@@ -258,6 +258,235 @@ impl Database {
             Err(e) => Err(e.into()),
         }
     }
+
+    // ── Pattern Engine DB Methods ─────────────────────────
+
+    /// Check if features are already extracted for a match
+    pub fn has_features(&self, match_id: &str, puuid: &str) -> Result<bool, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM game_features WHERE match_id = ?1 AND puuid = ?2",
+            rusqlite::params![match_id, puuid],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Store extracted game features
+    pub fn store_features(&self, match_id: &str, puuid: &str, features_json: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let f: serde_json::Value = serde_json::from_str(features_json)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO game_features
+             (match_id, puuid, champion_id, role, win, game_duration_min,
+              cs_at_10, cs_at_15, gold_diff_at_10, gold_diff_at_15, gold_diff_at_20,
+              deaths_before_15, deaths_after_25, vision_score_per_min, kill_participation,
+              had_early_lead, threw_lead, features_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+            rusqlite::params![
+                match_id, puuid,
+                f.get("champion_id").and_then(|v| v.as_i64()).unwrap_or(0),
+                f.get("role").and_then(|v| v.as_str()).unwrap_or(""),
+                f.get("win").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
+                f.get("game_duration_min").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                f.get("cs_at_10").and_then(|v| v.as_i64()),
+                f.get("cs_at_15").and_then(|v| v.as_i64()),
+                f.get("gold_diff_at_10").and_then(|v| v.as_i64()),
+                f.get("gold_diff_at_15").and_then(|v| v.as_i64()),
+                f.get("gold_diff_at_20").and_then(|v| v.as_i64()),
+                f.get("deaths_before_15").and_then(|v| v.as_i64()),
+                f.get("deaths_after_25").and_then(|v| v.as_i64()),
+                f.get("vision_score_per_min").and_then(|v| v.as_f64()),
+                f.get("kill_participation").and_then(|v| v.as_f64()),
+                f.get("had_early_lead").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
+                f.get("threw_lead").and_then(|v| v.as_bool()).unwrap_or(false) as i32,
+                features_json,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get all game features for a player
+    pub fn get_all_features(&self, puuid: &str) -> Result<Vec<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT features_json FROM game_features WHERE puuid = ?1")?;
+        let rows = stmt.query_map([puuid], |row| {
+            let json_str: String = row.get(0)?;
+            Ok(json_str)
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            if let Ok(json_str) = row {
+                if let Ok(val) = serde_json::from_str(&json_str) {
+                    results.push(val);
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    /// Store or update a detected pattern
+    pub fn store_pattern(&self, id: &str, puuid: &str, category: &str, description: &str,
+                          confidence: f64, sample_size: i32, impact_wr: Option<f64>,
+                          impact_pct: Option<f64>, trend: &str, evidence_json: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO detected_patterns (id, puuid, category, description, confidence, sample_size,
+             impact_wr_change, impact_games_pct, trend, evidence_json, last_updated)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'))
+             ON CONFLICT(id) DO UPDATE SET
+               description=excluded.description, confidence=excluded.confidence,
+               sample_size=excluded.sample_size, impact_wr_change=excluded.impact_wr_change,
+               impact_games_pct=excluded.impact_games_pct, trend=excluded.trend,
+               evidence_json=excluded.evidence_json, last_updated=datetime('now')",
+            rusqlite::params![id, puuid, category, description, confidence, sample_size,
+                              impact_wr, impact_pct, trend, evidence_json],
+        )?;
+        Ok(())
+    }
+
+    /// Get all detected patterns for a player
+    pub fn get_patterns(&self, puuid: &str) -> Result<Vec<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, category, description, confidence, sample_size,
+                    impact_wr_change, impact_games_pct, trend, evidence_json, first_detected, last_updated
+             FROM detected_patterns WHERE puuid = ?1 ORDER BY confidence DESC"
+        )?;
+        let rows = stmt.query_map([puuid], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "category": row.get::<_, String>(1)?,
+                "description": row.get::<_, String>(2)?,
+                "confidence": row.get::<_, f64>(3)?,
+                "sample_size": row.get::<_, i32>(4)?,
+                "impact_wr_change": row.get::<_, Option<f64>>(5)?,
+                "impact_games_pct": row.get::<_, Option<f64>>(6)?,
+                "trend": row.get::<_, String>(7)?,
+                "evidence_json": row.get::<_, String>(8)?,
+                "first_detected": row.get::<_, String>(9)?,
+                "last_updated": row.get::<_, String>(10)?,
+            }))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    /// Store a post-game analysis
+    pub fn store_post_game_analysis(&self, match_id: &str, puuid: &str, analysis_json: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO post_game_analyses (match_id, puuid, analysis_json) VALUES (?1, ?2, ?3)",
+            rusqlite::params![match_id, puuid, analysis_json],
+        )?;
+        Ok(())
+    }
+
+    /// Get a post-game analysis
+    pub fn get_post_game_analysis(&self, match_id: &str) -> Result<Option<String>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let result = conn.query_row(
+            "SELECT analysis_json FROM post_game_analyses WHERE match_id = ?1",
+            [match_id],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(json) => Ok(Some(json)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Get timeline raw JSON for a match
+    pub fn get_timeline_json(&self, match_id: &str) -> Result<Option<String>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let result = conn.query_row(
+            "SELECT raw_json FROM match_timelines WHERE match_id = ?1",
+            [match_id],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(json) => Ok(Some(json)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Get raw match JSON
+    pub fn get_match_json(&self, match_id: &str) -> Result<Option<String>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let result = conn.query_row(
+            "SELECT raw_json FROM matches WHERE match_id = ?1",
+            [match_id],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(json) => Ok(Some(json)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Store an improvement snapshot
+    pub fn store_improvement_snapshot(&self, puuid: &str, metric_key: &str, value: f64, match_count: i32, date: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO improvement_snapshots (puuid, metric_key, value, match_count, snapshot_date)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(puuid, metric_key, snapshot_date) DO UPDATE SET value=excluded.value, match_count=excluded.match_count",
+            rusqlite::params![puuid, metric_key, value, match_count, date],
+        )?;
+        Ok(())
+    }
+
+    /// Get improvement snapshots for a metric
+    pub fn get_improvement_snapshots(&self, puuid: &str, metric_key: &str, limit: i32) -> Result<Vec<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT snapshot_date, value, match_count FROM improvement_snapshots
+             WHERE puuid = ?1 AND metric_key = ?2 ORDER BY snapshot_date DESC LIMIT ?3"
+        )?;
+        let rows = stmt.query_map(rusqlite::params![puuid, metric_key, limit], |row| {
+            Ok(serde_json::json!({
+                "date": row.get::<_, String>(0)?,
+                "value": row.get::<_, f64>(1)?,
+                "match_count": row.get::<_, i32>(2)?,
+            }))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    /// Store an improvement goal
+    pub fn create_goal(&self, puuid: &str, name: &str, description: Option<&str>,
+                        metric_key: &str, target_value: Option<f64>, linked_pattern: Option<&str>) -> Result<i64, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO improvement_goals (puuid, name, description, metric_key, target_value, linked_pattern_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![puuid, name, description, metric_key, target_value, linked_pattern],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    /// Get active improvement goals
+    pub fn get_goals(&self, puuid: &str) -> Result<Vec<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, description, metric_key, target_value, linked_pattern_id, created_at
+             FROM improvement_goals WHERE puuid = ?1 AND active = 1 ORDER BY created_at DESC"
+        )?;
+        let rows = stmt.query_map([puuid], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "description": row.get::<_, Option<String>>(2)?,
+                "metric_key": row.get::<_, String>(3)?,
+                "target_value": row.get::<_, Option<f64>>(4)?,
+                "linked_pattern_id": row.get::<_, Option<String>>(5)?,
+                "created_at": row.get::<_, String>(6)?,
+            }))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
 }
 
 /// Row data for inserting a match participant

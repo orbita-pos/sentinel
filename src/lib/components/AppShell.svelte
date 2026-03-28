@@ -8,12 +8,18 @@
   import MatchHistory from "../../routes/MatchHistory.svelte";
   import ChampSelect from "../../routes/ChampSelect.svelte";
   import LiveGame from "../../routes/LiveGame.svelte";
+  import Patterns from "../../routes/Patterns.svelte";
+  import ImprovementTracker from "../../routes/ImprovementTracker.svelte";
+  import PostGame from "../../routes/PostGame.svelte";
 
   let route = $derived($currentRoute);
   let phase = $derived($gamePhase);
 
   // Track previous phase to detect transitions
   let prevPhase = $state("None");
+
+  // Track last match for post-game analysis
+  let postGameMatchId = $state("");
 
   // Auto-navigate based on game phase transitions
   $effect(() => {
@@ -23,7 +29,6 @@
       } else if (phase === "InProgress" || phase === "GameStart") {
         currentRoute.set("live-game");
       } else if (phase === "EndOfGame") {
-        // Stay on live-game to show final state, or go to dashboard
         currentRoute.set("dashboard");
       } else if (
         (prevPhase === "ChampSelect" || prevPhase === "InProgress") &&
@@ -53,19 +58,11 @@
       {:else if route === "live-game"}
         <LiveGame />
       {:else if route === "patterns"}
-        <div class="flex h-full items-center justify-center">
-          <div class="text-center">
-            <p class="text-lg" style="color: var(--text-secondary)">Patterns</p>
-            <p class="text-sm" style="color: var(--text-muted)">Coming in Phase 6</p>
-          </div>
-        </div>
+        <Patterns />
       {:else if route === "improvement"}
-        <div class="flex h-full items-center justify-center">
-          <div class="text-center">
-            <p class="text-lg" style="color: var(--text-secondary)">Improvement Tracker</p>
-            <p class="text-sm" style="color: var(--text-muted)">Coming in Phase 6</p>
-          </div>
-        </div>
+        <ImprovementTracker />
+      {:else if route === "post-game"}
+        <PostGame matchId={postGameMatchId} />
       {:else}
         <div class="flex h-full items-center justify-center">
           <p style="color: var(--text-muted)">Unknown route</p>
