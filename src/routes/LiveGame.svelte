@@ -22,9 +22,10 @@
       showMobileQR = false;
       return;
     }
-    invoke<{ url: string }>("get_mobile_url")
+    // Start server on first click (opt-in, not auto-start)
+    invoke<{ url: string }>("start_mobile_server")
       .then(r => { mobileUrl = r.url; showMobileQR = true; })
-      .catch(e => console.error("Failed to get mobile URL:", e));
+      .catch(e => console.error("Failed to start mobile server:", e));
   }
 
   // Community Dragon CDN for objective icons

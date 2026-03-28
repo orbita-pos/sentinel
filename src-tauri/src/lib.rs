@@ -367,7 +367,19 @@ fn get_item_intelligence(
 async fn get_opgg_build(
     champion: String,
     position: String,
+    db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
+    // [H3] Validate champion name
+    if champion.is_empty() || champion.len() > 30 || !champion.chars().all(|c| c.is_alphanumeric()) {
+        return Err("Invalid champion name".to_string());
+    }
+    // Verify champion exists in DB
+    let tags = db.get_champion_tags(&champion).map_err(|e| safe_err("DB lookup", e))?;
+    if tags.is_empty() {
+        tracing::warn!("Champion '{}' not found in DB, skipping OP.GG fetch", champion);
+        return Ok(serde_json::json!({}));
+    }
+
     let build = riot_api::opgg::fetch_champion_build(&champion, &position)
         .await
         .map_err(|e| safe_err("OP.GG build", e))?;
@@ -619,15 +631,75 @@ async fn close_mini_overlay(app_handle: tauri::AppHandle) -> Result<(), String> 
 // ── Mobile Companion ──────────────────────────────────────
 
 #[tauri::command]
-fn get_mobile_url() -> Result<serde_json::Value, String> {
+async fn start_mobile_server(
+    live_state: tauri::State<'_, Arc<AsyncMutex<Option<game_client::state::LiveGameState>>>>,
+    mobile_token: tauri::State<'_, Arc<AsyncMutex<Option<String>>>>,
+) -> Result<serde_json::Value, String> {
+    // Check if already running
+    {
+        let existing = mobile_token.lock().await;
+        if existing.is_some() {
+            let ip = local_ip_address::local_ip()
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|_| "localhost".to_string());
+            let token = existing.as_deref().unwrap_or("");
+            return Ok(serde_json::json!({
+                "url": format!("http://{}:3333/?token={}", ip, token),
+                "ip": ip,
+                "port": 3333,
+                "already_running": true,
+            }));
+        }
+    }
+
+    let state_clone = live_state.inner().clone();
+    let token_ref = mobile_token.inner().clone();
+
+    // Spawn server and get token
+    tauri::async_runtime::spawn(async move {
+        let token = mobile_server::start(state_clone).await;
+        let mut lock = token_ref.lock().await;
+        *lock = Some(token);
+    });
+
+    // Wait briefly for server to start and token to be set
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
     let ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
         .unwrap_or_else(|_| "localhost".to_string());
+
+    let token = mobile_token.lock().await;
+    let token_str = token.as_deref().unwrap_or("loading");
+
     Ok(serde_json::json!({
-        "url": format!("http://{}:3333", ip),
+        "url": format!("http://{}:3333/?token={}", ip, token_str),
         "ip": ip,
         "port": 3333,
     }))
+}
+
+#[tauri::command]
+fn get_mobile_url(
+    mobile_token: tauri::State<'_, Arc<AsyncMutex<Option<String>>>>,
+) -> Result<serde_json::Value, String> {
+    let ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "localhost".to_string());
+
+    let token = tauri::async_runtime::block_on(async {
+        mobile_token.lock().await.clone()
+    });
+
+    match token {
+        Some(t) => Ok(serde_json::json!({
+            "url": format!("http://{}:3333/?token={}", ip, t),
+            "ip": ip, "port": 3333, "running": true,
+        })),
+        None => Ok(serde_json::json!({
+            "url": "", "ip": ip, "port": 3333, "running": false,
+        })),
+    }
 }
 
 // ── App Setup ─────────────────────────────────────────────
@@ -690,11 +762,9 @@ pub fn run() {
                 Arc::new(AsyncMutex::new(None));
             app.manage(live_game_state.clone());
 
-            // Mobile companion server (phone access)
-            let mobile_state = live_game_state.clone();
-            tauri::async_runtime::spawn(async move {
-                mobile_server::start(mobile_state).await;
-            });
+            // Mobile server state (opt-in, not auto-started)
+            let mobile_token: Arc<AsyncMutex<Option<String>>> = Arc::new(AsyncMutex::new(None));
+            app.manage(mobile_token);
 
             // LCU Manager
             let lcu_manager = Arc::new(LcuManager::new(app_handle.clone()));
@@ -821,6 +891,7 @@ pub fn run() {
             get_live_game_state,
             open_mini_overlay,
             close_mini_overlay,
+            start_mobile_server,
             get_mobile_url,
             has_api_key,
             get_post_game_analysis,

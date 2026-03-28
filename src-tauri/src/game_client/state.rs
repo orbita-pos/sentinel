@@ -94,7 +94,7 @@ impl LiveGameState {
             champion: local_player_name.to_string(),
             level: active.level,
             current_gold: active.current_gold,
-            runes: active.champion_stats.clone(),
+            runes: active.full_runes.clone(),
             champion_stats: active.champion_stats.clone(),
         };
         self.game_mode = stats.game_mode.clone();

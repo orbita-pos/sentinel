@@ -373,29 +373,44 @@ impl Database {
     }
 
     /// Find all completed items that build FROM a given component item ID
+    /// [M3 fix] Parses JSON in Rust instead of LIKE to avoid false positives
     pub fn get_items_building_from(&self, component_id: i64) -> Result<Vec<serde_json::Value>, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
-        let pattern = format!("%{}%", component_id);
         let mut stmt = conn.prepare(
-            "SELECT item_id, name, gold_total, tags, from_items FROM items WHERE from_items LIKE ?1 AND gold_total > 0"
+            "SELECT item_id, name, gold_total, tags, from_items FROM items WHERE from_items IS NOT NULL AND gold_total > 0"
         )?;
-        let rows = stmt.query_map([&pattern], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "gold_total": row.get::<_, Option<i64>>(2)?,
-                "tags": row.get::<_, Option<String>>(3)?,
-                "from_items": row.get::<_, Option<String>>(4)?,
-            }))
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+        let mut results = Vec::new();
+        for row in rows {
+            let (id, name, gold, tags, from_items) = row?;
+            // Parse the from_items JSON array and check for exact ID match
+            if let Some(from_str) = &from_items {
+                let from_ids: Vec<i64> = serde_json::from_str(from_str).unwrap_or_default();
+                if from_ids.contains(&component_id) {
+                    results.push(serde_json::json!({
+                        "id": id, "name": name, "gold_total": gold,
+                        "tags": tags, "from_items": from_items,
+                    }));
+                }
+            }
+        }
+        Ok(results)
     }
 
     /// Get items by tag (e.g., "Armor", "SpellBlock", "Damage", "SpellDamage")
     /// Only returns completed items (gold_total > 2000)
     pub fn get_items_by_tag(&self, tag: &str) -> Result<Vec<serde_json::Value>, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
-        let pattern = format!("%\"{}%", tag);
+        // [M4 fix] More precise pattern with closing quote
+        let pattern = format!("%\"{}\"%" , tag);
         let mut stmt = conn.prepare(
             "SELECT item_id, name, gold_total, tags, from_items FROM items WHERE tags LIKE ?1 AND gold_total >= 2000 ORDER BY gold_total ASC LIMIT 10"
         )?;
