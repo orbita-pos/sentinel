@@ -7,6 +7,7 @@
   import Settings from "../../routes/Settings.svelte";
   import MatchHistory from "../../routes/MatchHistory.svelte";
   import ChampSelect from "../../routes/ChampSelect.svelte";
+  import LiveGame from "../../routes/LiveGame.svelte";
 
   let route = $derived($currentRoute);
   let phase = $derived($gamePhase);
@@ -19,8 +20,15 @@
     if (phase !== prevPhase) {
       if (phase === "ChampSelect") {
         currentRoute.set("champ-select");
-      } else if (prevPhase === "ChampSelect" && phase !== "ChampSelect") {
-        // Left champ select — go back to dashboard
+      } else if (phase === "InProgress" || phase === "GameStart") {
+        currentRoute.set("live-game");
+      } else if (phase === "EndOfGame") {
+        // Stay on live-game to show final state, or go to dashboard
+        currentRoute.set("dashboard");
+      } else if (
+        (prevPhase === "ChampSelect" || prevPhase === "InProgress") &&
+        phase === "None"
+      ) {
         currentRoute.set("dashboard");
       }
       prevPhase = phase;
@@ -42,6 +50,8 @@
         <MatchHistory />
       {:else if route === "champ-select"}
         <ChampSelect />
+      {:else if route === "live-game"}
+        <LiveGame />
       {:else if route === "patterns"}
         <div class="flex h-full items-center justify-center">
           <div class="text-center">

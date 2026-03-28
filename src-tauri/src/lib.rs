@@ -1,11 +1,9 @@
 mod analysis;
 mod database;
 mod error;
+mod game_client;
 mod lcu;
 mod riot_api;
-
-// Phase 5+
-// mod game_client;
 
 use std::sync::Arc;
 
@@ -136,6 +134,17 @@ async fn trigger_backfill(
 }
 
 #[tauri::command]
+fn get_live_game_state(
+    live_state: tauri::State<'_, Arc<AsyncMutex<Option<game_client::state::LiveGameState>>>>,
+) -> Result<serde_json::Value, String> {
+    let state = tauri::async_runtime::block_on(async { live_state.lock().await.clone() });
+    match state {
+        Some(s) => serde_json::to_value(&s).map_err(|e| e.to_string()),
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+#[tauri::command]
 fn get_champ_select_session(
     lcu: tauri::State<'_, Arc<LcuManager>>,
 ) -> Result<serde_json::Value, String> {
@@ -209,9 +218,82 @@ pub fn run() {
 
             app.manage(api_state);
 
+            // Initialize shared live game state
+            let live_game_state: Arc<AsyncMutex<Option<game_client::state::LiveGameState>>> =
+                Arc::new(AsyncMutex::new(None));
+            app.manage(live_game_state.clone());
+
             // Initialize LCU Manager
             let lcu_manager = Arc::new(LcuManager::new(app_handle.clone()));
             app.manage(lcu_manager.clone());
+
+            // Subscribe to LCU events for game client lifecycle
+            let mut lcu_rx = lcu_manager.subscribe();
+            let gc_app_handle = app_handle.clone();
+            let gc_live_state = live_game_state.clone();
+
+            tauri::async_runtime::spawn(async move {
+                let mut poller_handle: Option<tokio::task::JoinHandle<()>> = None;
+
+                loop {
+                    match lcu_rx.recv().await {
+                        Ok(lcu::types::LcuEvent::GameFlowChanged { phase }) => {
+                            match phase {
+                                lcu::types::GameFlowPhase::InProgress => {
+                                    // Spawn game client poller if not already running
+                                    if poller_handle.is_none() {
+                                        tracing::info!("Game started, spawning live game poller");
+                                        let handle = gc_app_handle.clone();
+                                        let state_ref = gc_live_state.clone();
+
+                                        poller_handle = Some(tokio::spawn(async move {
+                                            let mut poller =
+                                                game_client::poller::GameClientPoller::new(handle);
+                                            if let Err(e) = poller.run().await {
+                                                tracing::warn!("Game poller error: {e}");
+                                            }
+                                            // Store final state then clear
+                                            {
+                                                let final_state = poller.get_state();
+                                                let mut lock = state_ref.lock().await;
+                                                *lock = Some(final_state);
+                                            }
+                                            tracing::info!("Game poller stopped");
+                                        }));
+                                    }
+                                }
+                                lcu::types::GameFlowPhase::None
+                                | lcu::types::GameFlowPhase::Lobby
+                                | lcu::types::GameFlowPhase::EndOfGame => {
+                                    // Abort poller if running
+                                    if let Some(handle) = poller_handle.take() {
+                                        handle.abort();
+                                        tracing::info!("Game poller aborted (phase: {phase})");
+                                    }
+                                    // Clear live game state (unless EndOfGame — keep for review)
+                                    if phase != lcu::types::GameFlowPhase::EndOfGame {
+                                        let mut lock = gc_live_state.lock().await;
+                                        *lock = None;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        Ok(lcu::types::LcuEvent::Disconnected) => {
+                            if let Some(handle) = poller_handle.take() {
+                                handle.abort();
+                            }
+                            let mut lock = gc_live_state.lock().await;
+                            *lock = None;
+                        }
+                        Ok(_) => {}
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            tracing::warn!("Game lifecycle listener lagged by {n}");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            });
 
             tauri::async_runtime::spawn(async move {
                 lcu_manager.run().await;
@@ -231,6 +313,7 @@ pub fn run() {
             get_champ_select_session,
             get_draft_recommendations,
             get_champion_pool,
+            get_live_game_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sentinel");
