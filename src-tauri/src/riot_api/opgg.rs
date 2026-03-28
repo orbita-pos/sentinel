@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
-use std::collections::HashMap;
 
 const OPGG_MCP_URL: &str = "https://mcp-api.op.gg/mcp";
 
@@ -533,35 +532,3 @@ fn parse_meta_tierlist(text: &str, position: &str) -> Result<Vec<MetaChampion>> 
     Ok(champions)
 }
 
-/// Cache for champion builds (avoid re-fetching during the same game)
-pub struct BuildCache {
-    cache: HashMap<String, (std::time::Instant, ChampionBuild)>,
-}
-
-impl BuildCache {
-    pub fn new() -> Self {
-        Self { cache: HashMap::new() }
-    }
-
-    /// Get cached build or fetch from OP.GG (cache for 10 minutes)
-    pub async fn get(&mut self, champion: &str, position: &str) -> Option<ChampionBuild> {
-        let key = format!("{champion}_{position}");
-
-        if let Some((time, build)) = self.cache.get(&key) {
-            if time.elapsed().as_secs() < 600 {
-                return Some(build.clone());
-            }
-        }
-
-        match fetch_champion_build(champion, position).await {
-            Ok(build) => {
-                self.cache.insert(key, (std::time::Instant::now(), build.clone()));
-                Some(build)
-            }
-            Err(e) => {
-                tracing::warn!("Failed to fetch OP.GG build for {champion}: {e}");
-                None
-            }
-        }
-    }
-}
