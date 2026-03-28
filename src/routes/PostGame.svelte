@@ -25,6 +25,7 @@
     cs: number;
     key_moments: KeyMoment[];
     pattern_matches: PatternMatch[];
+    no_timeline?: boolean;
   }
 
   let { matchId = "" }: { matchId?: string } = $props();
@@ -89,7 +90,20 @@
       </div>
     </div>
 
+    <!-- No timeline banner -->
+    {#if analysis.no_timeline}
+      <div class="mb-4 rounded-lg border px-4 py-3" style="background: var(--bg-tertiary); border-color: var(--accent-blue); border-left: 3px solid var(--accent-blue)">
+        <p class="text-sm font-medium" style="color: var(--text-primary)">Basic stats only</p>
+        <p class="mt-1 text-xs" style="color: var(--text-secondary)">
+          Key moments and gold swing analysis require timeline data.
+          This is available when Sentinel is running during the game,
+          or with an API key for imported matches.
+        </p>
+      </div>
+    {/if}
+
     <!-- Key Moments -->
+    {#if analysis.key_moments.length > 0}
     <div class="mb-4">
       <h3 class="mb-3 text-sm font-semibold uppercase tracking-wide" style="color: var(--text-muted)">
         Key Moments ({analysis.key_moments.length})
@@ -115,6 +129,7 @@
         {/each}
       </div>
     </div>
+    {/if}
 
     <!-- Pattern Matches -->
     {#if analysis.pattern_matches.length > 0}
