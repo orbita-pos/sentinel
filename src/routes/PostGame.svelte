@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { currentSummoner } from "../lib/stores/connection.js";
+  import { championMap, getChampionName, getChampionImageUrl, currentPatch } from "../lib/stores/champions.js";
 
   interface KeyMoment {
     timestamp: string;
@@ -19,10 +20,13 @@
     outcome: string;
     duration: string;
     champion_name: string;
+    champion_id?: number;
     kills: number;
     deaths: number;
     assists: number;
     cs: number;
+    gold?: number;
+    vision_score?: number;
     key_moments: KeyMoment[];
     pattern_matches: PatternMatch[];
     no_timeline?: boolean;
@@ -33,6 +37,11 @@
   let loading = $state(false);
   let error = $state("");
   let summoner = $derived($currentSummoner);
+  let map = $derived($championMap);
+  let patch = $derived($currentPatch);
+
+  // Also load match stats from history for extra data
+  let matchStats: any = $state(null);
 
   async function loadAnalysis(id: string) {
     if (!id || !summoner?.puuid) return;
@@ -43,6 +52,11 @@
         matchId: id,
         puuid: summoner.puuid,
       });
+      // Load match stats for extra info (gold, cs, vision)
+      const history = await invoke<{ matches: any[] }>("get_match_history", {
+        puuid: summoner.puuid, count: 100, offset: 0,
+      });
+      matchStats = history.matches.find((m: any) => m.match_id === id) ?? null;
     } catch (e) {
       error = String(e);
     }
@@ -51,6 +65,37 @@
 
   $effect(() => {
     if (matchId && summoner?.puuid) loadAnalysis(matchId);
+  });
+
+  // Resolve champion name from map if needed
+  let champName = $derived(() => {
+    if (!analysis) return "";
+    // Try resolving from champion map if name looks like "Champion123"
+    if (analysis.champion_name.startsWith("Champion") && matchStats?.champion_id) {
+      return getChampionName(map, matchStats.champion_id);
+    }
+    if (matchStats?.champion_name && !matchStats.champion_name.startsWith("Champion")) {
+      return matchStats.champion_name;
+    }
+    return analysis.champion_name;
+  });
+
+  let champImg = $derived(() => {
+    const id = matchStats?.champion_id ?? analysis?.champion_id ?? 0;
+    return getChampionImageUrl(map, id, patch);
+  });
+
+  let kda = $derived(() => {
+    if (!analysis) return "0";
+    return analysis.deaths === 0 ? "Perfect" : ((analysis.kills + analysis.assists) / analysis.deaths).toFixed(1);
+  });
+
+  let kdaColor = $derived(() => {
+    if (!analysis) return "var(--text-primary)";
+    const ratio = analysis.deaths === 0 ? 99 : (analysis.kills + analysis.assists) / analysis.deaths;
+    if (ratio >= 5) return "var(--accent-gold)";
+    if (ratio >= 3) return "var(--accent-green)";
+    return "var(--text-primary)";
   });
 
   function goldColor(impact: number): string {
@@ -75,19 +120,67 @@
   {:else if error}
     <p class="text-sm" style="color: var(--accent-red)">{error}</p>
   {:else if analysis}
-    <!-- Header -->
+    <!-- Header Card -->
     <div class="mb-4 rounded-xl border p-5" style="background: var(--bg-secondary); border-color: var(--border); border-left: 4px solid {analysis.outcome === 'Victory' ? 'var(--accent-blue)' : 'var(--accent-red)'}">
-      <div class="flex items-center justify-between">
-        <div>
-          <span class="text-lg font-bold" style="color: {analysis.outcome === 'Victory' ? 'var(--accent-blue)' : 'var(--accent-red)'}">
-            {analysis.outcome}
-          </span>
-          <span class="ml-3 text-sm" style="color: var(--text-secondary)">{analysis.champion_name} - {analysis.duration}</span>
+      <div class="flex items-center gap-4">
+        <!-- Champion Image -->
+        <div class="h-16 w-16 shrink-0 overflow-hidden rounded-xl" style="background: var(--bg-tertiary)">
+          {#if champImg()}
+            <img src={champImg()} alt={champName()} class="h-full w-full object-cover" />
+          {:else}
+            <div class="flex h-full w-full items-center justify-center text-xl font-bold" style="color: var(--text-muted)">
+              {champName()[0] ?? "?"}
+            </div>
+          {/if}
         </div>
-        <span class="text-lg font-semibold" style="color: var(--text-primary)">
-          {analysis.kills}/{analysis.deaths}/{analysis.assists}
-        </span>
+
+        <!-- Match Info -->
+        <div class="flex-1">
+          <div class="flex items-center gap-3">
+            <span class="text-xl font-bold" style="color: {analysis.outcome === 'Victory' ? 'var(--accent-blue)' : 'var(--accent-red)'}">
+              {analysis.outcome}
+            </span>
+            <span class="text-sm" style="color: var(--text-secondary)">{champName()}</span>
+            <span class="text-xs" style="color: var(--text-muted)">{analysis.duration}</span>
+          </div>
+          <!-- KDA large -->
+          <div class="mt-1 flex items-baseline gap-2">
+            <span class="text-2xl font-bold" style="color: var(--text-primary)">
+              {analysis.kills}<span style="color: var(--text-muted)"> / </span>{analysis.deaths}<span style="color: var(--text-muted)"> / </span>{analysis.assists}
+            </span>
+            <span class="text-sm font-medium" style="color: {kdaColor()}">
+              {kda()} KDA
+            </span>
+          </div>
+        </div>
       </div>
+
+      <!-- Stats Row -->
+      {#if matchStats}
+        <div class="mt-4 flex gap-4 border-t pt-3" style="border-color: var(--border)">
+          <div class="flex flex-col items-center">
+            <span class="text-sm font-semibold" style="color: var(--text-primary)">{matchStats.cs}</span>
+            <span class="text-[10px]" style="color: var(--text-muted)">CS ({(matchStats.cs / (matchStats.game_duration / 60)).toFixed(1)}/min)</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-sm font-semibold" style="color: var(--accent-gold)">{(matchStats.gold / 1000).toFixed(1)}k</span>
+            <span class="text-[10px]" style="color: var(--text-muted)">Gold</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-sm font-semibold" style="color: var(--text-secondary)">{matchStats.vision_score}</span>
+            <span class="text-[10px]" style="color: var(--text-muted)">Vision</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-sm font-semibold" style="color: var(--text-secondary)">{matchStats.role ?? "?"}</span>
+            <span class="text-[10px]" style="color: var(--text-muted)">Role</span>
+          </div>
+          <div class="ml-auto flex flex-col items-end">
+            <span class="text-xs" style="color: var(--text-muted)">
+              {new Date(matchStats.game_creation).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+            </span>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <!-- No timeline banner -->
