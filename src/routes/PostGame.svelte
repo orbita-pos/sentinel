@@ -42,6 +42,7 @@
 
   // Also load match stats from history for extra data
   let matchStats: any = $state(null);
+  let opggBuild: any = $state(null);
 
   async function loadAnalysis(id: string) {
     if (!id || !summoner?.puuid) return;
@@ -57,6 +58,16 @@
         puuid: summoner.puuid, count: 100, offset: 0,
       });
       matchStats = history.matches.find((m: any) => m.match_id === id) ?? null;
+
+      // Fetch OP.GG optimal build for comparison
+      if (matchStats?.champion_id) {
+        const info = map[matchStats.champion_id];
+        if (info?.key) {
+          invoke("get_opgg_build", { champion: info.key, position: "all" })
+            .then((r: any) => { opggBuild = r; })
+            .catch(() => {});
+        }
+      }
     } catch (e) {
       error = String(e);
     }
@@ -222,6 +233,74 @@
         {/each}
       </div>
     </div>
+    {/if}
+
+    <!-- ═══ BUILD COMPARISON (OP.GG) ═══ -->
+    {#if opggBuild?.core_items?.item_ids?.length > 0}
+      <div class="mb-4 rounded-xl border p-5" style="background: var(--bg-secondary); border-color: var(--border)">
+        <div class="mb-3 flex items-center justify-between">
+          <h3 class="text-sm font-semibold uppercase tracking-wide" style="color: var(--accent-blue)">Build Comparison</h3>
+          {#if opggBuild.core_items.win_rate > 0}
+            <span class="rounded px-2 py-0.5 text-[10px] font-bold" style="background: var(--accent-green); color: white">
+              Optimal: {(opggBuild.core_items.win_rate * 100).toFixed(0)}% WR
+            </span>
+          {/if}
+        </div>
+
+        <!-- OP.GG Optimal Build -->
+        <div class="mb-3">
+          <p class="mb-1.5 text-[10px] font-medium" style="color: var(--text-muted)">
+            OP.GG Optimal ({opggBuild.core_items.games?.toLocaleString()} games)
+          </p>
+          <div class="flex gap-2">
+            {#each opggBuild.core_items.item_ids as id, i}
+              <div class="flex flex-col items-center gap-1">
+                <div class="h-10 w-10 overflow-hidden rounded-lg" style="border: 2px solid var(--accent-blue)">
+                  <img src={`https://ddragon.leagueoflegends.com/cdn/${patch}/img/item/${id}.png`} alt="" class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
+                </div>
+                <span class="text-[8px] text-center" style="color: var(--text-muted); max-width: 48px">{opggBuild.core_items.item_names?.[i]?.split(' ')[0] ?? ''}</span>
+              </div>
+            {/each}
+            {#if opggBuild.boots?.item_ids?.length > 0}
+              <div class="flex items-center text-[10px]" style="color: var(--text-muted)">+</div>
+              {#each opggBuild.boots.item_ids as bid, i}
+                <div class="flex flex-col items-center gap-1">
+                  <div class="h-10 w-10 overflow-hidden rounded-lg" style="border: 1px solid var(--border)">
+                    <img src={`https://ddragon.leagueoflegends.com/cdn/${patch}/img/item/${bid}.png`} alt="" class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
+                  </div>
+                  <span class="text-[8px] text-center" style="color: var(--text-muted); max-width: 48px">{opggBuild.boots.item_names?.[i]?.split(' ')[0] ?? ''}</span>
+                </div>
+              {/each}
+            {/if}
+          </div>
+        </div>
+
+        <!-- Insight -->
+        <div class="rounded-lg px-3 py-2" style="background: var(--bg-tertiary)">
+          <p class="text-xs" style="color: var(--text-secondary)">
+            {#if analysis.outcome === "Victory"}
+              You won this game. The optimal build above has a {(opggBuild.core_items.win_rate * 100).toFixed(0)}% WR across {opggBuild.core_items.games?.toLocaleString()} games. Compare your items to see if you could optimize further.
+            {:else}
+              The OP.GG optimal build has a {(opggBuild.core_items.win_rate * 100).toFixed(0)}% WR. Consider following this build path in future games on {champName()}.
+            {/if}
+          </p>
+        </div>
+
+        <!-- Runes used vs optimal -->
+        {#if opggBuild.runes?.primary_tree}
+          <div class="mt-3 flex items-center gap-2 border-t pt-2" style="border-color: var(--border)">
+            <span class="text-[9px] font-medium" style="color: var(--text-muted)">Optimal Runes:</span>
+            <span class="rounded px-1.5 py-0.5 text-[9px] font-medium" style="background: var(--bg-tertiary); color: var(--accent-purple)">{opggBuild.runes.primary_tree}</span>
+            {#if opggBuild.runes.secondary_tree}
+              <span class="text-[9px]" style="color: var(--text-muted)">+</span>
+              <span class="rounded px-1.5 py-0.5 text-[9px]" style="background: var(--bg-tertiary); color: var(--text-secondary)">{opggBuild.runes.secondary_tree}</span>
+            {/if}
+            {#if opggBuild.runes.win_rate > 0}
+              <span class="text-[9px]" style="color: var(--accent-green)">{(opggBuild.runes.win_rate * 100).toFixed(0)}% WR</span>
+            {/if}
+          </div>
+        {/if}
+      </div>
     {/if}
 
     <!-- Pattern Matches -->
