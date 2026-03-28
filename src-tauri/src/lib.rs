@@ -405,7 +405,7 @@ fn get_post_game_analysis(
     }
 
     // LCU format: extract basic stats from match_participants table instead
-    let history = db.get_match_history(&puuid, 1, 0).map_err(|e| safe_err("Get history", e))?;
+    let history = db.get_match_history(&puuid, 500, 0).map_err(|e| safe_err("Get history", e))?;
     let m = history.iter().find(|h| h.match_id == match_id);
 
     if let Some(m) = m {
