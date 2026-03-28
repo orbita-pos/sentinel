@@ -3,6 +3,7 @@ mod database;
 mod error;
 mod game_client;
 mod lcu;
+mod mobile_server;
 mod riot_api;
 
 use std::sync::Arc;
@@ -615,6 +616,20 @@ async fn close_mini_overlay(app_handle: tauri::AppHandle) -> Result<(), String> 
     Ok(())
 }
 
+// ── Mobile Companion ──────────────────────────────────────
+
+#[tauri::command]
+fn get_mobile_url() -> Result<serde_json::Value, String> {
+    let ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "localhost".to_string());
+    Ok(serde_json::json!({
+        "url": format!("http://{}:3333", ip),
+        "ip": ip,
+        "port": 3333,
+    }))
+}
+
 // ── App Setup ─────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -674,6 +689,12 @@ pub fn run() {
             let live_game_state: Arc<AsyncMutex<Option<game_client::state::LiveGameState>>> =
                 Arc::new(AsyncMutex::new(None));
             app.manage(live_game_state.clone());
+
+            // Mobile companion server (phone access)
+            let mobile_state = live_game_state.clone();
+            tauri::async_runtime::spawn(async move {
+                mobile_server::start(mobile_state).await;
+            });
 
             // LCU Manager
             let lcu_manager = Arc::new(LcuManager::new(app_handle.clone()));
@@ -800,6 +821,7 @@ pub fn run() {
             get_live_game_state,
             open_mini_overlay,
             close_mini_overlay,
+            get_mobile_url,
             has_api_key,
             get_post_game_analysis,
             get_detected_patterns,

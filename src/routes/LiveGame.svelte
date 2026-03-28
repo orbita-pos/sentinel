@@ -10,8 +10,21 @@
   let state = $derived($liveGameState);
   let activeTab: "overview" | "player" = $state("overview");
 
+  let mobileUrl = $state("");
+  let showMobileQR = $state(false);
+
   function openMiniOverlay() {
     invoke("open_mini_overlay").catch(e => console.error("Failed to open overlay:", e));
+  }
+
+  function togglePhoneCompanion() {
+    if (showMobileQR) {
+      showMobileQR = false;
+      return;
+    }
+    invoke<{ url: string }>("get_mobile_url")
+      .then(r => { mobileUrl = r.url; showMobileQR = true; })
+      .catch(e => console.error("Failed to get mobile URL:", e));
   }
 
   // Community Dragon CDN for objective icons
@@ -143,18 +156,45 @@
         style="background: {activeTab === 'player' ? 'var(--accent-purple)' : 'var(--bg-tertiary)'}; color: {activeTab === 'player' ? 'white' : 'var(--text-secondary)'}"
       >Player Advice</button>
 
-      <button
-        onclick={openMiniOverlay}
-        class="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-        style="background: var(--bg-tertiary); color: var(--text-secondary)"
-        title="Open floating mini window (stays on top of League)"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
-        </svg>
-        Mini Overlay
-      </button>
+      <div class="ml-auto flex items-center gap-2">
+        <button
+          onclick={openMiniOverlay}
+          class="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+          style="background: var(--bg-tertiary); color: var(--text-secondary)"
+          title="Open floating mini window (stays on top of League)"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
+          </svg>
+          Mini Overlay
+        </button>
+        <button
+          onclick={togglePhoneCompanion}
+          class="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+          style="background: {showMobileQR ? 'var(--accent-green)' : 'var(--bg-tertiary)'}; color: {showMobileQR ? 'white' : 'var(--text-secondary)'}"
+          title="Open on your phone"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+          </svg>
+          Phone
+        </button>
+      </div>
     </div>
+
+    <!-- Phone companion URL -->
+    {#if showMobileQR && mobileUrl}
+      <div class="mb-4 rounded-xl border p-4" style="background: var(--bg-secondary); border-color: var(--accent-green)">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-semibold" style="color: var(--text-primary)">Phone Companion</p>
+            <p class="mt-1 text-xs" style="color: var(--text-secondary)">Open this URL on your phone (same WiFi network):</p>
+            <p class="mt-2 select-text rounded-lg px-3 py-2 font-mono text-lg font-bold" style="background: var(--bg-primary); color: var(--accent-green); user-select: text">{mobileUrl}</p>
+            <p class="mt-2 text-[10px]" style="color: var(--text-muted)">Phone and PC must be on the same WiFi. Updates every 2 seconds.</p>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     {#if activeTab === "overview"}
       <!-- Gold diff graph -->
