@@ -386,6 +386,33 @@ async fn get_opgg_build(
     serde_json::to_value(&build).map_err(|e| safe_err("Serialize build", e))
 }
 
+/// Get counter picks and matchup data for draft
+#[tauri::command]
+async fn get_champion_matchups(
+    champion: String,
+    position: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    if champion.is_empty() || champion.len() > 30 {
+        return Err("Invalid champion name".to_string());
+    }
+    let tags = db.get_champion_tags(&champion).map_err(|e| safe_err("DB", e))?;
+    if tags.is_empty() { return Ok(serde_json::json!({})); }
+
+    let build = riot_api::opgg::fetch_champion_build(&champion, &position)
+        .await
+        .map_err(|e| safe_err("OP.GG matchups", e))?;
+
+    Ok(serde_json::json!({
+        "champion": champion,
+        "win_rate": build.win_rate,
+        "tier": build.tier,
+        "counters": build.counters,
+        "runes": build.runes,
+        "skill_order": build.skill_order,
+    }))
+}
+
 #[tauri::command]
 fn get_post_game_analysis(
     match_id: String,
@@ -888,6 +915,7 @@ pub fn run() {
             get_champion_pool,
             get_item_intelligence,
             get_opgg_build,
+            get_champion_matchups,
             get_live_game_state,
             open_mini_overlay,
             close_mini_overlay,

@@ -427,6 +427,112 @@ fn extract_quoted_strings(text: &str) -> Vec<String> {
     results
 }
 
+/// Meta champion entry for tier lists
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct MetaChampion {
+    pub champion: String,
+    pub tier: String,
+    pub win_rate: f64,
+    pub pick_rate: f64,
+    pub ban_rate: f64,
+    pub position: String,
+}
+
+/// Fetch meta tier list for a lane from OP.GG
+pub async fn fetch_meta_tierlist(position: &str) -> Result<Vec<MetaChampion>> {
+    let pos = match position.to_lowercase().as_str() {
+        "top" => "top", "jungle" | "jng" => "jungle",
+        "mid" | "middle" => "mid", "bot" | "bottom" | "adc" => "adc",
+        "support" | "sup" | "utility" => "support", _ => "all",
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "lol_list_lane_meta_champions",
+            "arguments": {
+                "game_mode": "ranked",
+                "position": pos
+            }
+        }
+    });
+
+    let resp = client
+        .post(OPGG_MCP_URL)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .json(&body)
+        .send()
+        .await
+        .context("OP.GG meta tierlist request failed")?;
+
+    let resp_text = resp.text().await?;
+    let rpc: serde_json::Value = serde_json::from_str(&resp_text)?;
+
+    let content_text = rpc
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|item| item.get("text"))
+        .and_then(|t| t.as_str())
+        .unwrap_or("");
+
+    parse_meta_tierlist(content_text, pos)
+}
+
+fn parse_meta_tierlist(text: &str, position: &str) -> Result<Vec<MetaChampion>> {
+    let mut champions = Vec::new();
+
+    // Look for champion entries in the response
+    // Format varies but typically: ChampionName, tier, winrate, pickrate, banrate
+    let quoted = extract_quoted_strings(text);
+    let nums: Vec<f64> = text.split(',')
+        .filter_map(|s| s.trim().trim_matches('"').trim_matches(')').trim_matches('(').parse().ok())
+        .collect();
+
+    // Parse in groups -- each champion has a name + numbers
+    // Simple heuristic: quoted strings are champion names, numbers follow
+    let mut num_idx = 0;
+    for name in &quoted {
+        // Skip non-champion strings (tier labels, etc.)
+        if name.len() < 2 || name.contains(' ') || name.starts_with('[') {
+            continue;
+        }
+
+        let win_rate = nums.get(num_idx).copied().unwrap_or(0.0);
+        let pick_rate = nums.get(num_idx + 1).copied().unwrap_or(0.0);
+        let ban_rate = nums.get(num_idx + 2).copied().unwrap_or(0.0);
+
+        // Determine tier from win rate
+        let tier = if win_rate >= 0.53 { "S" }
+            else if win_rate >= 0.51 { "A" }
+            else if win_rate >= 0.49 { "B" }
+            else { "C" };
+
+        if win_rate > 0.0 && win_rate < 1.0 {
+            champions.push(MetaChampion {
+                champion: name.clone(),
+                tier: tier.to_string(),
+                win_rate,
+                pick_rate,
+                ban_rate,
+                position: position.to_string(),
+            });
+            num_idx += 3;
+        }
+    }
+
+    // If parsing failed, just return what we have
+    Ok(champions)
+}
+
 /// Cache for champion builds (avoid re-fetching during the same game)
 pub struct BuildCache {
     cache: HashMap<String, (std::time::Instant, ChampionBuild)>,
