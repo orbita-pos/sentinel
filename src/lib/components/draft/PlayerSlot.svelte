@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ChampSelectPlayer } from "../../types/champselect.js";
-  import { championMap, getChampionName } from "../../stores/champions.js";
+  import { championMap, currentPatch, getChampionName, getChampionImageUrl } from "../../stores/champions.js";
 
   let { player, side }: { player: ChampSelectPlayer; side: "ally" | "enemy" } = $props();
 
@@ -13,25 +13,34 @@
   };
 
   let map = $derived($championMap);
+  let patch = $derived($currentPatch);
   let champName = $derived(getChampionName(map, player.champion_id));
+  let champImg = $derived(getChampionImageUrl(map, player.champion_id, patch));
   let isHovering = $derived(player.champion_id > 0);
   let roleLabel = $derived(roleLabels[player.assigned_position] ?? (player.assigned_position || "?"));
   let borderColor = $derived(side === "ally" ? "var(--accent-blue)" : "var(--accent-red)");
-
-  // First letter for the avatar
-  let avatarLetter = $derived(champName ? champName[0] : "?");
 </script>
 
 <div
   class="flex items-center gap-3 rounded-lg border px-3 py-2"
   style="background: var(--bg-tertiary); border-color: {player.is_local_player ? borderColor : 'var(--border)'}; border-left: 3px solid {borderColor}"
 >
-  <!-- Champion avatar -->
+  <!-- Champion image -->
   <div
-    class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold"
-    style="background: {isHovering ? 'var(--bg-primary)' : 'var(--bg-secondary)'}; color: {isHovering ? 'var(--text-primary)' : 'var(--text-muted)'}"
+    class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg"
+    style="background: var(--bg-secondary)"
   >
-    {avatarLetter}
+    {#if champImg}
+      <img
+        src={champImg}
+        alt={champName}
+        class="h-full w-full object-cover"
+        onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; (e.currentTarget as HTMLImageElement).nextElementSibling?.classList.remove('hidden') }}
+      />
+      <span class="hidden text-sm font-bold" style="color: var(--text-muted)">{champName[0] ?? "?"}</span>
+    {:else}
+      <span class="text-sm font-bold" style="color: var(--text-muted)">?</span>
+    {/if}
   </div>
 
   <div class="min-w-0 flex-1">

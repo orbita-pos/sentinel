@@ -291,17 +291,22 @@ impl Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
-    /// Get all champion ID -> name mappings
-    pub fn get_champion_map(&self) -> Result<std::collections::HashMap<i64, String>, AppError> {
+    /// Get all champion data: id -> {name, key, patch_version}
+    pub fn get_champion_map(&self) -> Result<std::collections::HashMap<i64, (String, String, String)>, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
-        let mut stmt = conn.prepare("SELECT champion_id, name FROM champions")?;
+        let mut stmt = conn.prepare("SELECT champion_id, name, champion_key, patch_version FROM champions")?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
         })?;
         let mut map = std::collections::HashMap::new();
         for row in rows {
-            if let Ok((id, name)) = row {
-                map.insert(id, name);
+            if let Ok((id, name, key, patch)) = row {
+                map.insert(id, (name, key, patch));
             }
         }
         Ok(map)

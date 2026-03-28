@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { championMap, getChampionName } from "../../stores/champions.js";
+  import { championMap, currentPatch, getChampionName, getChampionImageUrl } from "../../stores/champions.js";
 
   let { bans }: { bans: number[] } = $props();
   let map = $derived($championMap);
+  let patch = $derived($currentPatch);
 </script>
 
 {#if bans.length > 0}
@@ -12,9 +13,15 @@
     </p>
     <div class="flex flex-wrap gap-2">
       {#each bans as ban}
-        <span class="rounded-md px-2 py-1 text-xs font-medium" style="background: var(--bg-tertiary); color: var(--accent-red)">
-          {getChampionName(map, ban)}
-        </span>
+        {@const img = getChampionImageUrl(map, ban, patch)}
+        <div class="flex items-center gap-1.5 rounded-md px-2 py-1" style="background: var(--bg-tertiary)">
+          {#if img}
+            <img src={img} alt="" class="h-5 w-5 rounded" />
+          {/if}
+          <span class="text-xs font-medium" style="color: var(--accent-red)">
+            {getChampionName(map, ban)}
+          </span>
+        </div>
       {/each}
     </div>
   </div>
