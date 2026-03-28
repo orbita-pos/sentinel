@@ -1,66 +1,145 @@
 <script lang="ts">
   import { liveGameState } from "../lib/stores/livegame.js";
-  import GameTimer from "../lib/components/live/GameTimer.svelte";
   import GoldDiffGraph from "../lib/components/live/GoldDiffGraph.svelte";
   import TeamScoreboard from "../lib/components/live/TeamScoreboard.svelte";
   import PowerSpikeAlert from "../lib/components/live/PowerSpikeAlert.svelte";
   import ObjectiveTimers from "../lib/components/live/ObjectiveTimers.svelte";
 
   let state = $derived($liveGameState);
+
+  // Community Dragon CDN for objective icons
+  const CDN = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-match-history/global/default";
+
+  // Computed team stats
+  let blueKills = $derived(state?.my_team.reduce((s, p) => s + p.kills, 0) ?? 0);
+  let redKills = $derived(state?.enemy_team.reduce((s, p) => s + p.kills, 0) ?? 0);
+
+  // Estimate team gold from items
+  let blueGold = $derived(state?.my_team.reduce((s, p) => s + p.items.reduce((g, i) => g + i.price, 0), 0) ?? 0);
+  let redGold = $derived(state?.enemy_team.reduce((s, p) => s + p.items.reduce((g, i) => g + i.price, 0), 0) ?? 0);
+  let goldDiff = $derived(blueGold - redGold);
+  let goldDiffStr = $derived(() => {
+    const diff = Math.abs(goldDiff);
+    const sign = goldDiff >= 0 ? "+" : "-";
+    return `${sign}${(diff / 1000).toFixed(1)}k`;
+  });
+
+  // Game timer
+  let timerStr = $derived(() => {
+    if (!state) return "0:00";
+    const min = Math.floor(state.game_time / 60);
+    const sec = Math.floor(state.game_time % 60);
+    return `${min}:${sec.toString().padStart(2, "0")}`;
+  });
+
+  // Objective counts from events
+  let dragonCount = $derived(state?.objective_events.filter((e) => e.event_name === "DragonKill").length ?? 0);
+  let baronCount = $derived(state?.objective_events.filter((e) => e.event_name === "BaronKill").length ?? 0);
+  let heraldCount = $derived(state?.objective_events.filter((e) => e.event_name === "HeraldKill").length ?? 0);
+  let turretCount = $derived(state?.objective_events.filter((e) => e.event_name === "TurretKilled").length ?? 0);
+
+  // Event icons for recent events
+  const eventImg: Record<string, string> = {
+    DragonKill: `${CDN}/dragon-100.png`,
+    BaronKill: `${CDN}/baron-100.png`,
+    HeraldKill: `${CDN}/herald-100.png`,
+    TurretKilled: `${CDN}/tower-100.png`,
+    InhibKilled: `${CDN}/inhibitor-100.png`,
+  };
 </script>
 
 <PowerSpikeAlert />
 
 <div class="mx-auto max-w-5xl">
-  <!-- Header -->
-  <div class="mb-4 flex items-center justify-between">
-    <div>
-      <h2 class="text-2xl font-bold" style="color: var(--text-primary)">Live Game</h2>
-      <p class="mt-1 text-sm" style="color: var(--text-secondary)">
-        {#if state}
-          {state.game_mode} - Real-time companion
-        {:else}
-          Waiting for game to start...
-        {/if}
-      </p>
-    </div>
-    {#if state}
-      <GameTimer gameTime={state.game_time} />
-    {/if}
-  </div>
-
   {#if !state}
     <div class="flex h-64 items-center justify-center rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
       <div class="text-center">
-        <p class="text-sm" style="color: var(--text-secondary)">Game not yet detected</p>
-        <p class="mt-1 text-xs" style="color: var(--text-muted)">Sentinel will auto-navigate here when the game starts and poll at 1Hz</p>
+        <p class="text-lg font-semibold" style="color: var(--text-secondary)">Waiting for game to start...</p>
+        <p class="mt-2 text-xs" style="color: var(--text-muted)">Sentinel will auto-navigate here when the game starts</p>
       </div>
     </div>
   {:else}
+    <!-- ═══ ESPORTS SCOREBAR ═══ -->
+    <div class="mb-4 rounded-xl border overflow-hidden" style="background: var(--bg-secondary); border-color: var(--border)">
+      <div class="flex items-center justify-between px-4 py-3">
+        <!-- Blue side -->
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-bold uppercase" style="color: var(--accent-blue)">Blue</span>
+            <span class="text-2xl font-black" style="color: var(--text-primary)">{blueKills}</span>
+          </div>
+          <div class="flex flex-col items-end">
+            <span class="text-sm font-bold" style="color: var(--accent-gold)">{(blueGold / 1000).toFixed(1)}k</span>
+            <span class="text-[9px]" style="color: var(--text-muted)">gold</span>
+          </div>
+          <!-- Blue objectives -->
+          <div class="flex items-center gap-1.5">
+            {#each Array(dragonCount) as _}
+              <img src="{CDN}/dragon-100.png" alt="Dragon" class="h-5 w-5" />
+            {/each}
+            {#each Array(baronCount) as _}
+              <img src="{CDN}/baron-100.png" alt="Baron" class="h-5 w-5" />
+            {/each}
+            {#each Array(heraldCount) as _}
+              <img src="{CDN}/herald-100.png" alt="Herald" class="h-5 w-5" />
+            {/each}
+          </div>
+        </div>
+
+        <!-- Center: Timer + Gold Diff -->
+        <div class="flex flex-col items-center">
+          <span class="font-mono text-xl font-bold" style="color: var(--text-primary)">{timerStr()}</span>
+          <div class="flex items-center gap-1.5">
+            {#if goldDiff !== 0}
+              <span
+                class="rounded px-2 py-0.5 text-xs font-bold"
+                style="background: {goldDiff >= 0 ? 'rgba(59, 130, 246, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: {goldDiff >= 0 ? 'var(--accent-blue)' : 'var(--accent-red)'}"
+              >
+                {goldDiffStr()}
+              </span>
+            {:else}
+              <span class="text-xs" style="color: var(--text-muted)">Even</span>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Red side -->
+        <div class="flex items-center gap-4">
+          <!-- Red objectives (reversed) -->
+          <div class="flex items-center gap-1.5">
+            <!-- Enemy objectives would need separate tracking -- for now show turrets -->
+            {#each Array(turretCount) as _}
+              <img src="{CDN}/tower-100.png" alt="Turret" class="h-5 w-5 opacity-60" />
+            {/each}
+          </div>
+          <div class="flex flex-col items-start">
+            <span class="text-sm font-bold" style="color: var(--accent-gold)">{(redGold / 1000).toFixed(1)}k</span>
+            <span class="text-[9px]" style="color: var(--text-muted)">gold</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-2xl font-black" style="color: var(--text-primary)">{redKills}</span>
+            <span class="text-xs font-bold uppercase" style="color: var(--accent-red)">Red</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Gold diff graph -->
     <div class="mb-4">
       <GoldDiffGraph history={state.gold_diff_history} currentDiff={state.team_gold_diff} />
     </div>
 
-    <!-- Scoreboards side by side -->
+    <!-- Scoreboards -->
     <div class="mb-4 grid grid-cols-2 gap-4">
-      <TeamScoreboard
-        players={state.my_team}
-        label="Your Team"
-        color="var(--accent-blue)"
-      />
-      <TeamScoreboard
-        players={state.enemy_team}
-        label="Enemy Team"
-        color="var(--accent-red)"
-      />
+      <TeamScoreboard players={state.my_team} label="Your Team" color="var(--accent-blue)" />
+      <TeamScoreboard players={state.enemy_team} label="Enemy Team" color="var(--accent-red)" />
     </div>
 
-    <!-- Bottom row: objectives + recent events -->
+    <!-- Bottom: Objectives + Events -->
     <div class="grid grid-cols-2 gap-4">
       <ObjectiveTimers events={state.objective_events} gameTime={state.game_time} />
 
-      <!-- Recent events -->
+      <!-- Recent Events -->
       <div class="rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
         <div class="border-b px-4 py-2.5" style="border-color: var(--border)">
           <span class="text-xs font-bold uppercase tracking-wide" style="color: var(--text-muted)">Recent Events</span>
@@ -76,27 +155,27 @@
                 {@const isKill = event.event_name === "ChampionKill"}
                 {@const isMulti = event.event_name === "Multikill"}
                 {@const isAce = event.event_name === "Ace"}
-                {@const isObjective = ["DragonKill", "BaronKill", "HeraldKill", "TurretKilled", "InhibKilled"].includes(event.event_name)}
-                <div class="flex items-center gap-2 rounded-lg px-2.5 py-1.5" style="background: var(--bg-tertiary)">
-                  <!-- Event icon -->
-                  <div
-                    class="flex h-6 w-6 shrink-0 items-center justify-center rounded"
-                    style="background: {isAce ? 'var(--accent-gold)' : isMulti ? 'var(--accent-purple)' : isKill ? 'var(--bg-primary)' : isObjective ? 'var(--accent-blue)' : 'var(--bg-primary)'}; opacity: {isKill ? 0.8 : 1}"
-                  >
-                    {#if isKill}
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="2">
+                {@const objImg = eventImg[event.event_name]}
+                <div class="flex items-center gap-2.5 rounded-lg px-2.5 py-1.5" style="background: var(--bg-tertiary)">
+                  {#if objImg}
+                    <img src={objImg} alt={event.event_name} class="h-6 w-6 shrink-0" />
+                  {:else if isKill}
+                    <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded" style="background: var(--bg-primary)">
+                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="2.5">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
-                    {:else if isMulti || isAce}
+                    </div>
+                  {:else if isMulti || isAce}
+                    <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded" style="background: {isAce ? 'var(--accent-gold)' : 'var(--accent-purple)'}">
                       <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="white">
                         <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                       </svg>
-                    {:else}
-                      <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="var(--text-muted)">
-                        <circle cx="12" cy="12" r="4" />
-                      </svg>
-                    {/if}
-                  </div>
+                    </div>
+                  {:else}
+                    <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded" style="background: var(--bg-primary)">
+                      <div class="h-2 w-2 rounded-full" style="background: var(--text-muted)"></div>
+                    </div>
+                  {/if}
                   <span
                     class="flex-1 text-xs"
                     style="color: {isAce ? 'var(--accent-gold)' : isMulti ? 'var(--accent-purple)' : 'var(--text-secondary)'}"
