@@ -291,6 +291,22 @@ impl Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
     }
 
+    /// Get all champion ID -> name mappings
+    pub fn get_champion_map(&self) -> Result<std::collections::HashMap<i64, String>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare("SELECT champion_id, name FROM champions")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map = std::collections::HashMap::new();
+        for row in rows {
+            if let Ok((id, name)) = row {
+                map.insert(id, name);
+            }
+        }
+        Ok(map)
+    }
+
     /// Get champion name by ID from static data
     pub fn get_champion_name(&self, champion_id: i64) -> Result<Option<String>, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;

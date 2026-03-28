@@ -1,5 +1,8 @@
 <script lang="ts">
+  import { championMap, getChampionName } from "../../stores/champions.js";
+
   let { bans }: { bans: number[] } = $props();
+  let map = $derived($championMap);
 </script>
 
 {#if bans.length > 0}
@@ -10,7 +13,7 @@
     <div class="flex flex-wrap gap-2">
       {#each bans as ban}
         <span class="rounded-md px-2 py-1 text-xs font-medium" style="background: var(--bg-tertiary); color: var(--accent-red)">
-          {ban}
+          {getChampionName(map, ban)}
         </span>
       {/each}
     </div>

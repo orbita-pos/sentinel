@@ -80,10 +80,10 @@ fn parse_team(team_arr: Option<&Vec<serde_json::Value>>, local_cell_id: i64) -> 
     arr.iter()
         .filter_map(|p| {
             let cell_id = p.get("cellId").and_then(|v| v.as_i64()).unwrap_or(-1);
-            let champion_id = p.get("championId")
-                .or_else(|| p.get("championPickIntent"))
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
+            // championId = locked pick, championPickIntent = hover/intent before lock
+            let locked_id = p.get("championId").and_then(|v| v.as_i64()).unwrap_or(0);
+            let intent_id = p.get("championPickIntent").and_then(|v| v.as_i64()).unwrap_or(0);
+            let champion_id = if locked_id > 0 { locked_id } else { intent_id };
             let summoner_id = p.get("summonerId").and_then(|v| v.as_i64()).unwrap_or(0);
             let assigned_position = p.get("assignedPosition")
                 .and_then(|v| v.as_str())

@@ -75,6 +75,12 @@ fn get_db_stats(db: tauri::State<'_, Arc<Database>>) -> Result<serde_json::Value
     db.get_stats().map_err(|e| safe_err("Database stats", e))
 }
 
+#[tauri::command]
+fn get_champion_map(db: tauri::State<'_, Arc<Database>>) -> Result<serde_json::Value, String> {
+    let map = db.get_champion_map().map_err(|e| safe_err("Champion map", e))?;
+    serde_json::to_value(&map).map_err(|e| safe_err("Serialize champion map", e))
+}
+
 /// [H4] Now async (was sync with block_on). [C1] Uses encrypted storage. [H2] Validates region.
 #[tauri::command]
 async fn set_api_key(
@@ -559,6 +565,7 @@ pub fn run() {
             get_connection_status,
             get_app_version,
             get_db_stats,
+            get_champion_map,
             set_api_key,
             set_region,
             get_match_history,
