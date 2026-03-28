@@ -626,7 +626,9 @@ pub fn run() {
                     match lcu_rx.recv().await {
                         Ok(lcu::types::LcuEvent::GameFlowChanged { phase }) => {
                             match phase {
-                                lcu::types::GameFlowPhase::InProgress => {
+                                lcu::types::GameFlowPhase::InProgress
+                                | lcu::types::GameFlowPhase::GameStart
+                                | lcu::types::GameFlowPhase::Reconnect => {
                                     if poller_handle.is_none() {
                                         tracing::info!("Game started, spawning live game poller");
                                         let handle = gc_app_handle.clone();
