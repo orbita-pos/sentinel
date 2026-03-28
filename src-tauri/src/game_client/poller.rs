@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter};
 use super::state::LiveGameState;
 use super::types::{AllPlayer, ActivePlayer, EventData, GameStats};
 use crate::database::{Database, LiveSnapshotRow};
+use crate::lcu::tls;
 
 /// Polls the Game Client API at 1Hz and emits state updates.
 /// Also records snapshots to SQLite for timeline reconstruction.
@@ -28,11 +29,8 @@ const SNAPSHOT_INTERVAL: f64 = 10.0; // Record every 10 seconds
 
 impl GameClientPoller {
     pub fn new(app_handle: AppHandle, db: Option<Arc<Database>>, puuid: String) -> Self {
-        let http = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .timeout(Duration::from_secs(3))
-            .build()
-            .expect("Failed to build game client HTTP client");
+        // Use the shared TLS builder with Riot cert (fixes C2)
+        let http = tls::build_game_client_http();
 
         let session_id = format!("live_{}", chrono::Utc::now().timestamp_millis());
 
@@ -51,7 +49,7 @@ impl GameClientPoller {
 
     /// Get current state
     pub fn get_state(&self) -> LiveGameState {
-        self.state.lock().unwrap().clone()
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Get the session ID for this game
@@ -134,13 +132,13 @@ impl GameClientPoller {
         // Collect new power spikes before updating
         let prev_spike_count;
         {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             prev_spike_count = state.power_spikes.len();
         }
 
         // Update composite state
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             state.update(&players, &events, &stats, &self.local_player_name);
         }
 
@@ -158,7 +156,7 @@ impl GameClientPoller {
         }
 
         // Emit state to frontend
-        let state = self.state.lock().unwrap().clone();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
         if state.power_spikes.len() > prev_spike_count {
             for spike in &state.power_spikes[prev_spike_count..] {
@@ -227,7 +225,7 @@ impl GameClientPoller {
     /// Finalize the session with game results from final state
     fn finalize_session(&self) {
         let Some(db) = &self.db else { return };
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         let local = state
             .my_team

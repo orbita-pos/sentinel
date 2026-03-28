@@ -14,10 +14,46 @@ use riot_api::fetcher::MatchFetcher;
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 
-/// Shared state for the Riot API + fetcher (needs API key to initialize)
+// ── Security helpers ──────────────────────────────────────
+
+/// [H2-H3] Allowlist of valid Riot platform regions
+const VALID_REGIONS: &[&str] = &[
+    "na1", "euw1", "eun1", "kr", "br1", "la1", "la2",
+    "oc1", "tr1", "ru", "jp1", "ph2", "sg2", "th2", "tw2", "vn2",
+];
+
+/// [M1] Log the real error, return a safe message to the frontend
+fn safe_err(context: &str, e: impl std::fmt::Display) -> String {
+    tracing::error!("{context}: {e}");
+    format!("{context}: operation failed")
+}
+
+/// [M4] Validate puuid format (alphanumeric + hyphens, reasonable length)
+fn validate_puuid(puuid: &str) -> Result<(), String> {
+    if puuid.is_empty() || puuid.len() > 100 {
+        return Err("Invalid player ID".to_string());
+    }
+    if !puuid.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        return Err("Invalid player ID format".to_string());
+    }
+    Ok(())
+}
+
+/// [H2] Validate region against allowlist
+fn validate_region(region: &str) -> Result<(), String> {
+    if !VALID_REGIONS.contains(&region) {
+        return Err(format!("Invalid region: {region}"));
+    }
+    Ok(())
+}
+
+// ── State ─────────────────────────────────────────────────
+
 struct ApiState {
     fetcher: Option<Arc<MatchFetcher>>,
 }
+
+// ── Tauri Commands ────────────────────────────────────────
 
 #[tauri::command]
 fn get_connection_status(lcu: tauri::State<'_, Arc<LcuManager>>) -> serde_json::Value {
@@ -36,57 +72,68 @@ fn get_app_version() -> String {
 
 #[tauri::command]
 fn get_db_stats(db: tauri::State<'_, Arc<Database>>) -> Result<serde_json::Value, String> {
-    db.get_stats().map_err(|e| e.to_string())
+    db.get_stats().map_err(|e| safe_err("Database stats", e))
 }
 
+/// [H4] Now async (was sync with block_on). [C1] Uses encrypted storage. [H2] Validates region.
 #[tauri::command]
-fn set_api_key(
+async fn set_api_key(
     key: String,
     db: tauri::State<'_, Arc<Database>>,
     api_state: tauri::State<'_, Arc<AsyncMutex<ApiState>>>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    db.set_state("api_key", &key).map_err(|e| e.to_string())?;
+    // [H2] Validate key format
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        return Err("API key cannot be empty".to_string());
+    }
+    if !key.starts_with("RGAPI-") && key.len() > 10 {
+        return Err("Invalid API key format. Keys start with RGAPI-".to_string());
+    }
 
-    // Get region
+    // [C1] Store encrypted
+    db.set_api_key(&key).map_err(|e| safe_err("Save API key", e))?;
+
+    // [H2] Validate region
     let platform = db
         .get_state("region")
-        .map_err(|e| e.to_string())?
+        .map_err(|e| safe_err("Get region", e))?
         .unwrap_or_else(|| "la1".to_string());
+    validate_region(&platform)?;
 
-    // Initialize the API client + fetcher
     let api_client = Arc::new(RiotApiClient::new(key, platform));
     let fetcher = Arc::new(MatchFetcher::new(api_client, db.inner().clone(), app_handle));
 
-    let api_state_clone = api_state.inner().clone();
-    tauri::async_runtime::block_on(async {
-        let mut state = api_state_clone.lock().await;
-        state.fetcher = Some(fetcher);
-    });
+    // [H4] Direct await instead of block_on
+    let mut state = api_state.lock().await;
+    state.fetcher = Some(fetcher);
 
     tracing::info!("API key configured");
     Ok(())
 }
 
+/// [H4] Now async. [H2-H3] Validates region against allowlist.
 #[tauri::command]
-fn set_region(
+async fn set_region(
     region: String,
     db: tauri::State<'_, Arc<Database>>,
     api_state: tauri::State<'_, Arc<AsyncMutex<ApiState>>>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    db.set_state("region", &region).map_err(|e| e.to_string())?;
+    // [H2-H3] Validate region
+    validate_region(&region)?;
 
-    // Re-initialize if API key exists
-    if let Ok(Some(api_key)) = db.get_state("api_key") {
+    db.set_state("region", &region).map_err(|e| safe_err("Save region", e))?;
+
+    // Re-initialize if API key exists [C1] using encrypted getter
+    if let Ok(Some(api_key)) = db.get_api_key() {
         let api_client = Arc::new(RiotApiClient::new(api_key, region));
         let fetcher = Arc::new(MatchFetcher::new(api_client, db.inner().clone(), app_handle));
 
-        let api_state_clone = api_state.inner().clone();
-        tauri::async_runtime::block_on(async {
-            let mut state = api_state_clone.lock().await;
-            state.fetcher = Some(fetcher);
-        });
+        // [H4] Direct await
+        let mut state = api_state.lock().await;
+        state.fetcher = Some(fetcher);
     }
 
     Ok(())
@@ -99,8 +146,12 @@ fn get_match_history(
     offset: i32,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    let matches = db.get_match_history(&puuid, count, offset).map_err(|e| e.to_string())?;
-    let total = db.get_match_count(&puuid).map_err(|e| e.to_string())?;
+    validate_puuid(&puuid)?; // [M4]
+    let count = count.clamp(1, 100); // [M2]
+    let offset = offset.max(0); // [M2]
+
+    let matches = db.get_match_history(&puuid, count, offset).map_err(|e| safe_err("Match history", e))?;
+    let total = db.get_match_count(&puuid).map_err(|e| safe_err("Match count", e))?;
     Ok(serde_json::json!({
         "matches": matches,
         "total": total,
@@ -115,14 +166,14 @@ async fn trigger_backfill(
     db: tauri::State<'_, Arc<Database>>,
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    // Try Riot API first (if key configured)
+    validate_puuid(&puuid)?; // [M4]
+
     let fetcher = {
         let state = api_state.lock().await;
         state.fetcher.clone()
     };
 
     if let Some(fetcher) = fetcher {
-        // API key path: full backfill with timelines
         if let Err(e) = fetcher.update_static_data().await {
             tracing::warn!("Failed to update static data: {e}");
         }
@@ -130,12 +181,11 @@ async fn trigger_backfill(
         let count = fetcher
             .backfill(&puuid, 20)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| safe_err("Backfill", e))?;
 
         return Ok(serde_json::json!({ "fetched": count, "source": "riot_api" }));
     }
 
-    // No API key: use LCU local match history
     let lcu_client = lcu.get_client().ok_or("Not connected to League client")?;
 
     let _ = app_handle.emit("backfill-progress", serde_json::json!({"current": 0, "total": 0, "match_id": "Fetching from League client..."}));
@@ -143,7 +193,7 @@ async fn trigger_backfill(
     let matches = lcu_client
         .get_match_history(&puuid, 20)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| safe_err("LCU match fetch", e))?;
 
     let mut stored = 0;
     for m in &matches {
@@ -151,14 +201,8 @@ async fn trigger_backfill(
             continue;
         }
         if let Err(e) = db.store_match(
-            &m.match_id,
-            m.game_creation,
-            m.game_duration,
-            &m.game_mode,
-            m.queue_id,
-            None,
-            &m.raw_json,
-            &m.participants,
+            &m.match_id, m.game_creation, m.game_duration,
+            &m.game_mode, m.queue_id, None, &m.raw_json, &m.participants,
         ) {
             tracing::warn!("Failed to store LCU match {}: {e}", m.match_id);
             continue;
@@ -167,14 +211,13 @@ async fn trigger_backfill(
     }
 
     let _ = app_handle.emit("backfill-complete", serde_json::json!({"fetched": stored}));
-
-    tracing::info!("Stored {stored} matches from LCU (no API key)");
+    tracing::info!("Stored {stored} matches from LCU");
     Ok(serde_json::json!({ "fetched": stored, "source": "lcu" }))
 }
 
 #[tauri::command]
 fn has_api_key(db: tauri::State<'_, Arc<Database>>) -> bool {
-    db.get_state("api_key")
+    db.get_api_key() // [C1] Uses encrypted getter
         .ok()
         .flatten()
         .map(|k| !k.is_empty())
@@ -182,12 +225,12 @@ fn has_api_key(db: tauri::State<'_, Arc<Database>>) -> bool {
 }
 
 #[tauri::command]
-fn get_live_game_state(
+async fn get_live_game_state(
     live_state: tauri::State<'_, Arc<AsyncMutex<Option<game_client::state::LiveGameState>>>>,
 ) -> Result<serde_json::Value, String> {
-    let state = tauri::async_runtime::block_on(async { live_state.lock().await.clone() });
+    let state = live_state.lock().await.clone(); // [H4] proper async
     match state {
-        Some(s) => serde_json::to_value(&s).map_err(|e| e.to_string()),
+        Some(s) => serde_json::to_value(&s).map_err(|e| safe_err("Live game state", e)),
         None => Ok(serde_json::Value::Null),
     }
 }
@@ -197,7 +240,7 @@ fn get_champ_select_session(
     lcu: tauri::State<'_, Arc<LcuManager>>,
 ) -> Result<serde_json::Value, String> {
     match lcu.get_champ_select() {
-        Some(session) => serde_json::to_value(&session).map_err(|e| e.to_string()),
+        Some(session) => serde_json::to_value(&session).map_err(|e| safe_err("Champ select", e)),
         None => Ok(serde_json::Value::Null),
     }
 }
@@ -208,9 +251,10 @@ fn get_draft_recommendations(
     lcu: tauri::State<'_, Arc<LcuManager>>,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
+    validate_puuid(&puuid)?; // [M4]
     let session = lcu.get_champ_select().ok_or("Not in champion select")?;
     let recs = analysis::draft::get_recommendations(&session, db.inner(), &puuid);
-    serde_json::to_value(&recs).map_err(|e| e.to_string())
+    serde_json::to_value(&recs).map_err(|e| safe_err("Draft recommendations", e))
 }
 
 #[tauri::command]
@@ -218,8 +262,9 @@ fn get_champion_pool(
     puuid: String,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    let pool = db.get_champion_pool(&puuid, 1).map_err(|e| e.to_string())?;
-    serde_json::to_value(&pool).map_err(|e| e.to_string())
+    validate_puuid(&puuid)?; // [M4]
+    let pool = db.get_champion_pool(&puuid, 1).map_err(|e| safe_err("Champion pool", e))?;
+    serde_json::to_value(&pool).map_err(|e| safe_err("Champion pool", e))
 }
 
 #[tauri::command]
@@ -228,36 +273,36 @@ fn get_post_game_analysis(
     puuid: String,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    // Check for cached analysis
+    validate_puuid(&puuid)?; // [M4]
+
     if let Ok(Some(cached)) = db.get_post_game_analysis(&match_id) {
-        return serde_json::from_str(&cached).map_err(|e| e.to_string());
+        return serde_json::from_str(&cached).map_err(|e| safe_err("Parse analysis", e));
     }
 
-    // Generate analysis from stored data
-    let match_json = db.get_match_json(&match_id).map_err(|e| e.to_string())?
+    let match_json = db.get_match_json(&match_id).map_err(|e| safe_err("Get match", e))?
         .ok_or("Match not found")?;
-    let timeline_json = db.get_timeline_json(&match_id).map_err(|e| e.to_string())?
+    let timeline_json = db.get_timeline_json(&match_id).map_err(|e| safe_err("Get timeline", e))?
         .ok_or("Timeline not found")?;
 
-    let match_data: riot_api::types::RiotMatch = serde_json::from_str(&match_json).map_err(|e| e.to_string())?;
-    let timeline: riot_api::types::MatchTimeline = serde_json::from_str(&timeline_json).map_err(|e| e.to_string())?;
+    let match_data: riot_api::types::RiotMatch = serde_json::from_str(&match_json)
+        .map_err(|e| safe_err("Parse match", e))?;
+    let timeline: riot_api::types::MatchTimeline = serde_json::from_str(&timeline_json)
+        .map_err(|e| safe_err("Parse timeline", e))?;
 
-    // Extract features if not already done
     if !db.has_features(&match_id, &puuid).unwrap_or(true) {
         if let Some(features) = analysis::patterns::extract_features(&match_data, &timeline, &puuid) {
-            let features_json = serde_json::to_string(&features).unwrap_or_default();
-            let _ = db.store_features(&match_id, &puuid, &features_json);
+            let fj = serde_json::to_string(&features).unwrap_or_default();
+            let _ = db.store_features(&match_id, &puuid, &fj);
         }
     }
 
     let analysis = analysis::post_game::analyze(&match_data, &timeline, &puuid, db.inner())
         .ok_or("Failed to generate analysis")?;
 
-    // Cache it
     let analysis_json = serde_json::to_string(&analysis).unwrap_or_default();
     let _ = db.store_post_game_analysis(&match_id, &puuid, &analysis_json);
 
-    serde_json::to_value(&analysis).map_err(|e| e.to_string())
+    serde_json::to_value(&analysis).map_err(|e| safe_err("Serialize analysis", e))
 }
 
 #[tauri::command]
@@ -265,7 +310,8 @@ fn get_detected_patterns(
     puuid: String,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    let patterns = db.get_patterns(&puuid).map_err(|e| e.to_string())?;
+    validate_puuid(&puuid)?; // [M4]
+    let patterns = db.get_patterns(&puuid).map_err(|e| safe_err("Get patterns", e))?;
     Ok(serde_json::Value::Array(patterns))
 }
 
@@ -274,8 +320,9 @@ fn run_pattern_analysis(
     puuid: String,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    // First, extract features for all matches that don't have them
-    let matches = db.get_match_history(&puuid, 200, 0).map_err(|e| e.to_string())?;
+    validate_puuid(&puuid)?; // [M4]
+
+    let matches = db.get_match_history(&puuid, 200, 0).map_err(|e| safe_err("Get matches", e))?;
     let mut extracted = 0;
 
     for m in &matches {
@@ -290,14 +337,9 @@ fn run_pattern_analysis(
             Ok(Some(j)) => j,
             _ => continue,
         };
-        let match_data: riot_api::types::RiotMatch = match serde_json::from_str(&match_json) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        let timeline: riot_api::types::MatchTimeline = match serde_json::from_str(&timeline_json) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
+        let Ok(match_data) = serde_json::from_str::<riot_api::types::RiotMatch>(&match_json) else { continue };
+        let Ok(timeline) = serde_json::from_str::<riot_api::types::MatchTimeline>(&timeline_json) else { continue };
+
         if let Some(features) = analysis::patterns::extract_features(&match_data, &timeline, &puuid) {
             let fj = serde_json::to_string(&features).unwrap_or_default();
             let _ = db.store_features(&m.match_id, &puuid, &fj);
@@ -305,7 +347,6 @@ fn run_pattern_analysis(
         }
     }
 
-    // Run pattern detection
     let patterns = analysis::patterns::detect_patterns(db.inner(), &puuid);
 
     Ok(serde_json::json!({
@@ -320,8 +361,9 @@ fn get_weekly_metrics(
     puuid: String,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
+    validate_puuid(&puuid)?; // [M4]
     let metrics = analysis::improvement::compute_metrics(db.inner(), &puuid);
-    serde_json::to_value(&metrics).map_err(|e| e.to_string())
+    serde_json::to_value(&metrics).map_err(|e| safe_err("Weekly metrics", e))
 }
 
 #[tauri::command]
@@ -329,7 +371,8 @@ fn get_improvement_goals(
     puuid: String,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    let goals = db.get_goals(&puuid).map_err(|e| e.to_string())?;
+    validate_puuid(&puuid)?; // [M4]
+    let goals = db.get_goals(&puuid).map_err(|e| safe_err("Get goals", e))?;
     Ok(serde_json::Value::Array(goals))
 }
 
@@ -341,10 +384,13 @@ fn create_improvement_goal(
     target_value: Option<f64>,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
+    validate_puuid(&puuid)?; // [M4]
     let id = db.create_goal(&puuid, &name, None, &metric_key, target_value, None)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| safe_err("Create goal", e))?;
     Ok(serde_json::json!({ "id": id }))
 }
+
+// ── App Setup ─────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -359,13 +405,12 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
 
-            // Initialize database
             let db = Arc::new(Database::new(&app_handle)?);
             db.run_migrations()?;
             tracing::info!("Database initialized");
             app.manage(db.clone());
 
-            // Fetch Data Dragon static data (NO API key needed -- public CDN)
+            // Data Dragon (no API key needed)
             let ddragon_db = db.clone();
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = riot_api::ddragon::update_static_data(&ddragon_db).await {
@@ -373,41 +418,43 @@ pub fn run() {
                 }
             });
 
-            // Initialize API state (no fetcher until API key is set)
+            // API state
             let api_state = Arc::new(AsyncMutex::new(ApiState { fetcher: None }));
 
-            // Try to restore API key from database
-            if let Ok(Some(api_key)) = db.get_state("api_key") {
+            // [C1] Restore API key using encrypted getter
+            if let Ok(Some(api_key)) = db.get_api_key() {
                 let platform = db
                     .get_state("region")
                     .ok()
                     .flatten()
                     .unwrap_or_else(|| "la1".to_string());
-                let api_client = Arc::new(RiotApiClient::new(api_key, platform));
-                let fetcher = Arc::new(MatchFetcher::new(
-                    api_client,
-                    db.clone(),
-                    app_handle.clone(),
-                ));
-                tauri::async_runtime::block_on(async {
-                    let mut state = api_state.lock().await;
-                    state.fetcher = Some(fetcher);
-                });
-                tracing::info!("Restored API key from database");
+
+                // [H2] Validate restored region
+                if VALID_REGIONS.contains(&platform.as_str()) {
+                    let api_client = Arc::new(RiotApiClient::new(api_key, platform));
+                    let fetcher = Arc::new(MatchFetcher::new(
+                        api_client, db.clone(), app_handle.clone(),
+                    ));
+                    tauri::async_runtime::block_on(async {
+                        let mut state = api_state.lock().await;
+                        state.fetcher = Some(fetcher);
+                    });
+                    tracing::info!("Restored API key from database");
+                }
             }
 
             app.manage(api_state);
 
-            // Initialize shared live game state
+            // Live game state
             let live_game_state: Arc<AsyncMutex<Option<game_client::state::LiveGameState>>> =
                 Arc::new(AsyncMutex::new(None));
             app.manage(live_game_state.clone());
 
-            // Initialize LCU Manager
+            // LCU Manager
             let lcu_manager = Arc::new(LcuManager::new(app_handle.clone()));
             app.manage(lcu_manager.clone());
 
-            // Subscribe to LCU events for game client lifecycle
+            // Game lifecycle listener
             let mut lcu_rx = lcu_manager.subscribe();
             let gc_app_handle = app_handle.clone();
             let gc_live_state = live_game_state.clone();
@@ -422,14 +469,12 @@ pub fn run() {
                         Ok(lcu::types::LcuEvent::GameFlowChanged { phase }) => {
                             match phase {
                                 lcu::types::GameFlowPhase::InProgress => {
-                                    // Spawn game client poller if not already running
                                     if poller_handle.is_none() {
                                         tracing::info!("Game started, spawning live game poller");
                                         let handle = gc_app_handle.clone();
                                         let state_ref = gc_live_state.clone();
                                         let poller_db = gc_db.clone();
 
-                                        // Get puuid from LCU manager
                                         let puuid = gc_lcu
                                             .get_state()
                                             .summoner
@@ -439,9 +484,7 @@ pub fn run() {
                                         poller_handle = Some(tokio::spawn(async move {
                                             let mut poller =
                                                 game_client::poller::GameClientPoller::new(
-                                                    handle,
-                                                    Some(poller_db.clone()),
-                                                    puuid.clone(),
+                                                    handle, Some(poller_db.clone()), puuid.clone(),
                                                 );
                                             let session_id = poller.session_id().to_string();
 
@@ -449,19 +492,13 @@ pub fn run() {
                                                 tracing::warn!("Game poller error: {e}");
                                             }
 
-                                            // Extract features from live capture
                                             let final_state = poller.get_state();
                                             if !puuid.is_empty() && final_state.game_time > 300.0 {
                                                 let local = final_state.my_team.iter().find(|p| p.is_local_player);
                                                 if let Some(local) = local {
                                                     if let Some(features) = analysis::live_timeline::extract_features_from_session(
-                                                        &poller_db,
-                                                        &session_id,
-                                                        &puuid,
-                                                        &local.champion,
-                                                        0, // champion_id not available from Game Client API
-                                                        "", // role
-                                                        false, // win unknown yet
+                                                        &poller_db, &session_id, &puuid,
+                                                        &local.champion, 0, "", false,
                                                         final_state.game_time,
                                                     ) {
                                                         let fj = serde_json::to_string(&features).unwrap_or_default();
@@ -472,7 +509,6 @@ pub fn run() {
                                                 }
                                             }
 
-                                            // Store final state
                                             {
                                                 let mut lock = state_ref.lock().await;
                                                 *lock = Some(final_state);
@@ -484,12 +520,10 @@ pub fn run() {
                                 lcu::types::GameFlowPhase::None
                                 | lcu::types::GameFlowPhase::Lobby
                                 | lcu::types::GameFlowPhase::EndOfGame => {
-                                    // Abort poller if running
                                     if let Some(handle) = poller_handle.take() {
                                         handle.abort();
                                         tracing::info!("Game poller aborted (phase: {phase})");
                                     }
-                                    // Clear live game state (unless EndOfGame — keep for review)
                                     if phase != lcu::types::GameFlowPhase::EndOfGame {
                                         let mut lock = gc_live_state.lock().await;
                                         *lock = None;

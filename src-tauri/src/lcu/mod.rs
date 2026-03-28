@@ -50,17 +50,17 @@ impl LcuManager {
 
     /// Get current connection state (for Tauri commands)
     pub fn get_state(&self) -> ConnectionState {
-        self.state.lock().unwrap().clone()
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Get current champ select session (if in ChampSelect phase)
     pub fn get_champ_select(&self) -> Option<ChampSelectSession> {
-        self.champ_select_session.lock().unwrap().clone()
+        self.champ_select_session.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Get the current LCU client (if connected)
     pub fn get_client(&self) -> Option<LcuClient> {
-        self.current_client.lock().unwrap().clone()
+        self.current_client.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Main loop: detect client → connect → maintain → reconnect

@@ -72,11 +72,11 @@ impl RateLimiter {
     pub async fn acquire(&self) {
         loop {
             let wait = {
-                let short_wait = self.short.lock().unwrap().try_acquire();
+                let short_wait = self.short.lock().unwrap_or_else(|e| e.into_inner()).try_acquire();
                 if let Some(w) = short_wait {
                     Some(w)
                 } else {
-                    self.long.lock().unwrap().try_acquire()
+                    self.long.lock().unwrap_or_else(|e| e.into_inner()).try_acquire()
                 }
             };
 
@@ -110,11 +110,11 @@ mod tests {
         let limiter = RateLimiter::dev();
         // Should allow 20 immediate requests
         for _ in 0..20 {
-            let wait = limiter.short.lock().unwrap().try_acquire();
+            let wait = limiter.short.lock().unwrap_or_else(|e| e.into_inner()).try_acquire();
             assert!(wait.is_none());
         }
         // 21st should require waiting
-        let wait = limiter.short.lock().unwrap().try_acquire();
+        let wait = limiter.short.lock().unwrap_or_else(|e| e.into_inner()).try_acquire();
         assert!(wait.is_some());
     }
 }

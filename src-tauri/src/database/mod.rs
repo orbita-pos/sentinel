@@ -7,6 +7,33 @@ use tauri::Manager;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+// ── API Key obfuscation ───────────────────────────────────
+// Not cryptographically strong, but prevents casual exposure
+// when someone opens sentinel.db with a SQLite browser.
+// Riot dev keys expire in 24h, so this is proportional.
+const OBFUSCATION_KEY: &[u8] = b"SentinelApp2024!SecureKeyStorage";
+const OBFUSCATED_PREFIX: &str = "enc:";
+
+fn obfuscate(value: &str) -> String {
+    let xored: Vec<u8> = value
+        .bytes()
+        .enumerate()
+        .map(|(i, b)| b ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.len()])
+        .collect();
+    format!("{OBFUSCATED_PREFIX}{}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &xored))
+}
+
+fn deobfuscate(stored: &str) -> Option<String> {
+    let encoded = stored.strip_prefix(OBFUSCATED_PREFIX)?;
+    let xored = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, encoded).ok()?;
+    let original: Vec<u8> = xored
+        .iter()
+        .enumerate()
+        .map(|(i, b)| b ^ OBFUSCATION_KEY[i % OBFUSCATION_KEY.len()])
+        .collect();
+    String::from_utf8(original).ok()
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
     path: PathBuf,
@@ -67,6 +94,26 @@ impl Database {
             Ok(val) => Ok(Some(val)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Store API key with obfuscation (not stored as plaintext)
+    pub fn set_api_key(&self, key: &str) -> Result<(), AppError> {
+        let encrypted = obfuscate(key);
+        self.set_state("api_key", &encrypted)
+    }
+
+    /// Retrieve API key, deobfuscating if stored encrypted
+    pub fn get_api_key(&self) -> Result<Option<String>, AppError> {
+        let stored = self.get_state("api_key")?;
+        match stored {
+            Some(val) if val.starts_with(OBFUSCATED_PREFIX) => Ok(deobfuscate(&val)),
+            Some(val) => {
+                // Legacy plaintext key -- re-encrypt it
+                let _ = self.set_api_key(&val);
+                Ok(Some(val))
+            }
+            None => Ok(None),
         }
     }
 
