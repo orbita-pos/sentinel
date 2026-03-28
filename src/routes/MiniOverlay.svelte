@@ -48,8 +48,8 @@
     return `${m}:${s.toString().padStart(2, "0")}`;
   });
 
-  let blueKills = $derived(state?.my_team.reduce((s, p) => s + p.kills, 0) ?? 0);
-  let redKills = $derived(state?.enemy_team.reduce((s, p) => s + p.kills, 0) ?? 0);
+  let blueKills = $derived(state?.my_team_kills ?? 0);
+  let redKills = $derived(state?.enemy_team_kills ?? 0);
 
   function champImg(n: string) { return `https://ddragon.leagueoflegends.com/cdn/${patch}/img/champion/${n}.png`; }
   function itemImg(id: number) { return `https://ddragon.leagueoflegends.com/cdn/${patch}/img/item/${id}.png`; }

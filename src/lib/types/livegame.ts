@@ -4,6 +4,14 @@ export interface LiveGameState {
   my_team: LivePlayerState[];
   enemy_team: LivePlayerState[];
   team_gold_diff: number;
+  my_team_gold: number;
+  enemy_team_gold: number;
+  my_team_kills: number;
+  enemy_team_kills: number;
+  dragon_count: number;
+  baron_count: number;
+  herald_count: number;
+  turret_count: number;
   gold_diff_history: GoldDiffPoint[];
   recent_events: LiveEvent[];
   power_spikes: PowerSpike[];

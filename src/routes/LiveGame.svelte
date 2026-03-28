@@ -31,14 +31,11 @@
   // Community Dragon CDN for objective icons
   const CDN = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-match-history/global/default";
 
-  // Computed team stats
-  let blueKills = $derived(state?.my_team.reduce((s, p) => s + p.kills, 0) ?? 0);
-  let redKills = $derived(state?.enemy_team.reduce((s, p) => s + p.kills, 0) ?? 0);
-
-  // Team gold: use item price * count for accurate estimation
-  let blueGold = $derived(state?.my_team.reduce((s, p) => s + p.items.reduce((g, i) => g + i.price * (i.count || 1), 0), 0) ?? 0);
-  let redGold = $derived(state?.enemy_team.reduce((s, p) => s + p.items.reduce((g, i) => g + i.price * (i.count || 1), 0), 0) ?? 0);
-  // Use backend gold diff (more accurate, tracks history)
+  // All values from backend (pre-computed per tick in Rust)
+  let blueKills = $derived(state?.my_team_kills ?? 0);
+  let redKills = $derived(state?.enemy_team_kills ?? 0);
+  let blueGold = $derived(state?.my_team_gold ?? 0);
+  let redGold = $derived(state?.enemy_team_gold ?? 0);
   let goldDiff = $derived(state?.team_gold_diff ?? 0);
   let goldDiffStr = $derived(() => {
     const diff = Math.abs(goldDiff);
@@ -54,11 +51,11 @@
     return `${min}:${sec.toString().padStart(2, "0")}`;
   });
 
-  // Objective counts from events
-  let dragonCount = $derived(state?.objective_events.filter((e) => e.event_name === "DragonKill").length ?? 0);
-  let baronCount = $derived(state?.objective_events.filter((e) => e.event_name === "BaronKill").length ?? 0);
-  let heraldCount = $derived(state?.objective_events.filter((e) => e.event_name === "HeraldKill").length ?? 0);
-  let turretCount = $derived(state?.objective_events.filter((e) => e.event_name === "TurretKilled").length ?? 0);
+  // Objective counts from backend
+  let dragonCount = $derived(state?.dragon_count ?? 0);
+  let baronCount = $derived(state?.baron_count ?? 0);
+  let heraldCount = $derived(state?.herald_count ?? 0);
+  let turretCount = $derived(state?.turret_count ?? 0);
 
   // Event icons for recent events
   const eventImg: Record<string, string> = {

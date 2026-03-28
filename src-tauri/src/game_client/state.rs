@@ -10,6 +10,14 @@ pub struct LiveGameState {
     pub my_team: Vec<LivePlayerState>,
     pub enemy_team: Vec<LivePlayerState>,
     pub team_gold_diff: i64,
+    pub my_team_gold: i64,
+    pub enemy_team_gold: i64,
+    pub my_team_kills: i64,
+    pub enemy_team_kills: i64,
+    pub dragon_count: i32,
+    pub baron_count: i32,
+    pub herald_count: i32,
+    pub turret_count: i32,
     pub gold_diff_history: Vec<GoldDiffPoint>,
     pub recent_events: Vec<LiveEvent>,
     pub power_spikes: Vec<PowerSpike>,
@@ -150,7 +158,11 @@ impl LiveGameState {
 
         self.my_team = my_team;
         self.enemy_team = enemy_team;
+        self.my_team_gold = my_gold;
+        self.enemy_team_gold = enemy_gold;
         self.team_gold_diff = my_gold - enemy_gold;
+        self.my_team_kills = self.my_team.iter().map(|p| p.kills).sum();
+        self.enemy_team_kills = self.enemy_team.iter().map(|p| p.kills).sum();
 
         // Record gold diff point (every ~5 seconds to keep history manageable)
         let should_record = self
@@ -175,6 +187,12 @@ impl LiveGameState {
 
         // Process game events (objectives)
         self.process_events(events);
+
+        // Pre-compute objective counts
+        self.dragon_count = self.objective_events.iter().filter(|e| e.event_name == "DragonKill").count() as i32;
+        self.baron_count = self.objective_events.iter().filter(|e| e.event_name == "BaronKill").count() as i32;
+        self.herald_count = self.objective_events.iter().filter(|e| e.event_name == "HeraldKill").count() as i32;
+        self.turret_count = self.objective_events.iter().filter(|e| e.event_name == "TurretKilled").count() as i32;
     }
 
     fn collect_item_sets(&self) -> Vec<(String, Vec<i64>)> {
