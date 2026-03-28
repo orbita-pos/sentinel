@@ -68,6 +68,116 @@ impl LcuClient {
         Ok(GameFlowPhase::from_str_lossy(&phase_str))
     }
 
+    /// Make a POST request to an LCU endpoint
+    async fn post_json(&self, endpoint: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let resp = self.client.post(&url).json(body).send().await.context("LCU POST failed")?;
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if !status.is_success() { anyhow::bail!("LCU POST {status}: {text}"); }
+        Ok(serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+    }
+
+    /// Make a PUT request to an LCU endpoint
+    async fn put_json(&self, endpoint: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let resp = self.client.put(&url).json(body).send().await.context("LCU PUT failed")?;
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if !status.is_success() { anyhow::bail!("LCU PUT {status}: {text}"); }
+        Ok(serde_json::from_str(&text).unwrap_or(serde_json::Value::Null))
+    }
+
+    /// Make a DELETE request to an LCU endpoint
+    async fn delete(&self, endpoint: &str) -> Result<()> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let resp = self.client.delete(&url).send().await.context("LCU DELETE failed")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("LCU DELETE {status}: {body}");
+        }
+        Ok(())
+    }
+
+    // ── Rune Pages ──────────────────────────────────────
+
+    /// Get current rune pages
+    pub async fn get_rune_pages(&self) -> Result<Vec<serde_json::Value>> {
+        self.get("/lol-perks/v1/pages").await
+    }
+
+    /// Get the current active rune page
+    pub async fn get_current_rune_page(&self) -> Result<serde_json::Value> {
+        self.get("/lol-perks/v1/currentpage").await
+    }
+
+    /// Delete a rune page by ID
+    pub async fn delete_rune_page(&self, page_id: i64) -> Result<()> {
+        self.delete(&format!("/lol-perks/v1/pages/{page_id}")).await
+    }
+
+    /// Create a new rune page
+    /// `primary_style_id`: primary tree ID (e.g., 8000 for Precision)
+    /// `sub_style_id`: secondary tree ID
+    /// `selected_perk_ids`: array of 6 rune IDs (4 primary + 2 secondary)
+    /// `stat_perk_ids`: array of 3 stat mod IDs
+    pub async fn create_rune_page(
+        &self,
+        name: &str,
+        primary_style_id: i64,
+        sub_style_id: i64,
+        selected_perk_ids: &[i64],
+        stat_perk_ids: &[i64; 3],
+    ) -> Result<serde_json::Value> {
+        let body = serde_json::json!({
+            "name": name,
+            "primaryStyleId": primary_style_id,
+            "subStyleId": sub_style_id,
+            "selectedPerkIds": selected_perk_ids,
+            "current": true,
+            "isActive": true,
+            "order": 0,
+        });
+        self.post_json("/lol-perks/v1/pages", &body).await
+    }
+
+    /// Set rune page: deletes an editable page and creates a new one
+    pub async fn set_rune_page(
+        &self,
+        name: &str,
+        primary_style_id: i64,
+        sub_style_id: i64,
+        selected_perk_ids: &[i64],
+    ) -> Result<()> {
+        // Get existing pages
+        let pages = self.get_rune_pages().await.unwrap_or_default();
+
+        // Find a deletable page (not a preset)
+        for page in &pages {
+            let is_deletable = page.get("isDeletable").and_then(|v| v.as_bool()).unwrap_or(false);
+            let is_editable = page.get("isEditable").and_then(|v| v.as_bool()).unwrap_or(false);
+            if is_deletable || is_editable {
+                if let Some(id) = page.get("id").and_then(|v| v.as_i64()) {
+                    let _ = self.delete_rune_page(id).await;
+                    break;
+                }
+            }
+        }
+
+        // Create new page
+        self.create_rune_page(
+            name,
+            primary_style_id,
+            sub_style_id,
+            selected_perk_ids,
+            &[5008, 5008, 5002], // Default stat mods (adaptive, adaptive, armor)
+        ).await?;
+
+        tracing::info!("Rune page '{name}' imported successfully");
+        Ok(())
+    }
+
     /// Get recent match history from the local client (NO API key needed)
     /// Returns parsed match data ready for DB storage
     pub async fn get_match_history(&self, puuid: &str, count: i32) -> Result<Vec<LcuMatchData>> {

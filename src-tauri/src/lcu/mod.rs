@@ -1,6 +1,7 @@
 pub mod champ_select;
 pub mod connector;
 pub mod lockfile;
+pub mod runes;
 pub mod tls;
 pub mod types;
 pub mod websocket;

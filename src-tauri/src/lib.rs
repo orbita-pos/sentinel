@@ -386,6 +386,65 @@ async fn get_opgg_build(
     serde_json::to_value(&build).map_err(|e| safe_err("Serialize build", e))
 }
 
+/// Import optimal rune page from OP.GG into the League client
+#[tauri::command]
+async fn import_runes(
+    champion: String,
+    position: String,
+    lcu: tauri::State<'_, Arc<LcuManager>>,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    // Validate
+    if champion.is_empty() || champion.len() > 30 {
+        return Err("Invalid champion name".to_string());
+    }
+
+    // Get LCU client
+    let client = lcu.get_client().ok_or("Not connected to League client")?;
+
+    // Fetch OP.GG build (which includes runes)
+    let build = riot_api::opgg::fetch_champion_build(&champion, &position)
+        .await
+        .map_err(|e| safe_err("Fetch runes", e))?;
+
+    if build.runes.primary_tree.is_empty() {
+        return Err("No rune data available from OP.GG".to_string());
+    }
+
+    // Convert rune tree names to IDs
+    let primary_id = lcu::runes::tree_id(&build.runes.primary_tree);
+    let secondary_id = lcu::runes::tree_id(&build.runes.secondary_tree);
+
+    // Convert rune names to IDs
+    let primary_rune_ids = lcu::runes::resolve_rune_ids(&build.runes.primary_runes);
+    let secondary_rune_ids = lcu::runes::resolve_rune_ids(&build.runes.secondary_runes);
+
+    // Combine: 4 primary + 2 secondary = 6 selected perks
+    let mut selected_perks: Vec<i64> = Vec::new();
+    selected_perks.extend(primary_rune_ids.iter().take(4));
+    selected_perks.extend(secondary_rune_ids.iter().take(2));
+
+    if selected_perks.len() < 4 {
+        return Err("Could not resolve enough rune IDs".to_string());
+    }
+
+    // Import to League client
+    let page_name = format!("Sentinel: {} ({:.0}% WR)", champion, build.runes.win_rate * 100.0);
+
+    client
+        .set_rune_page(&page_name, primary_id, secondary_id, &selected_perks)
+        .await
+        .map_err(|e| safe_err("Import runes", e))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "page_name": page_name,
+        "primary_tree": build.runes.primary_tree,
+        "secondary_tree": build.runes.secondary_tree,
+        "win_rate": build.runes.win_rate,
+    }))
+}
+
 /// Get counter picks and matchup data for draft
 #[tauri::command]
 async fn get_champion_matchups(
@@ -915,6 +974,7 @@ pub fn run() {
             get_champion_pool,
             get_item_intelligence,
             get_opgg_build,
+            import_runes,
             get_champion_matchups,
             get_live_game_state,
             open_mini_overlay,
