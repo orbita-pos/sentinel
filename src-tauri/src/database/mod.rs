@@ -327,6 +327,90 @@ impl Database {
         }
     }
 
+    // ── Item Intelligence DB Methods ──────────────────────
+
+    /// Get champion tags (e.g., ["Mage", "Assassin"]) by champion name (Data Dragon key)
+    pub fn get_champion_tags(&self, champion_key: &str) -> Result<Vec<String>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let result = conn.query_row(
+            "SELECT tags FROM champions WHERE champion_key = ?1 OR name = ?1",
+            [champion_key],
+            |row| row.get::<_, Option<String>>(0),
+        );
+        match result {
+            Ok(Some(tags_str)) => {
+                Ok(serde_json::from_str(&tags_str).unwrap_or_default())
+            }
+            Ok(None) => Ok(vec![]),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(vec![]),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Get item info by ID (cost, tags, recipe)
+    pub fn get_item_info(&self, item_id: i64) -> Result<Option<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let result = conn.query_row(
+            "SELECT item_id, name, gold_total, gold_base, tags, from_items, into_items FROM items WHERE item_id = ?1",
+            [item_id],
+            |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "name": row.get::<_, String>(1)?,
+                    "gold_total": row.get::<_, Option<i64>>(2)?,
+                    "gold_base": row.get::<_, Option<i64>>(3)?,
+                    "tags": row.get::<_, Option<String>>(4)?,
+                    "from_items": row.get::<_, Option<String>>(5)?,
+                    "into_items": row.get::<_, Option<String>>(6)?,
+                }))
+            },
+        );
+        match result {
+            Ok(val) => Ok(Some(val)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Find all completed items that build FROM a given component item ID
+    pub fn get_items_building_from(&self, component_id: i64) -> Result<Vec<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let pattern = format!("%{}%", component_id);
+        let mut stmt = conn.prepare(
+            "SELECT item_id, name, gold_total, tags, from_items FROM items WHERE from_items LIKE ?1 AND gold_total > 0"
+        )?;
+        let rows = stmt.query_map([&pattern], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "gold_total": row.get::<_, Option<i64>>(2)?,
+                "tags": row.get::<_, Option<String>>(3)?,
+                "from_items": row.get::<_, Option<String>>(4)?,
+            }))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    /// Get items by tag (e.g., "Armor", "SpellBlock", "Damage", "SpellDamage")
+    /// Only returns completed items (gold_total > 2000)
+    pub fn get_items_by_tag(&self, tag: &str) -> Result<Vec<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let pattern = format!("%\"{}%", tag);
+        let mut stmt = conn.prepare(
+            "SELECT item_id, name, gold_total, tags, from_items FROM items WHERE tags LIKE ?1 AND gold_total >= 2000 ORDER BY gold_total ASC LIMIT 10"
+        )?;
+        let rows = stmt.query_map([&pattern], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "gold_total": row.get::<_, Option<i64>>(2)?,
+                "tags": row.get::<_, Option<String>>(3)?,
+                "from_items": row.get::<_, Option<String>>(4)?,
+            }))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
     // ── Pattern Engine DB Methods ─────────────────────────
 
     /// Check if features are already extracted for a match

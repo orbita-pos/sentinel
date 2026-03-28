@@ -340,9 +340,26 @@ fn get_champion_pool(
     puuid: String,
     db: tauri::State<'_, Arc<Database>>,
 ) -> Result<serde_json::Value, String> {
-    validate_puuid(&puuid)?; // [M4]
+    validate_puuid(&puuid)?;
     let pool = db.get_champion_pool(&puuid, 1).map_err(|e| safe_err("Champion pool", e))?;
     serde_json::to_value(&pool).map_err(|e| safe_err("Champion pool", e))
+}
+
+#[tauri::command]
+fn get_item_intelligence(
+    my_champion: String,
+    my_items: Vec<i64>,
+    my_gold: f64,
+    enemy_champions: Vec<String>,
+    enemy_items: Vec<Vec<i64>>,
+    enemy_stats: Vec<(i64, i64, i64)>,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    let result = analysis::items::analyze(
+        db.inner(), &my_champion, &my_items, my_gold,
+        &enemy_champions, &enemy_items, &enemy_stats,
+    );
+    serde_json::to_value(&result).map_err(|e| safe_err("Item intelligence", e))
 }
 
 #[tauri::command]
@@ -728,6 +745,7 @@ pub fn run() {
             get_champ_select_session,
             get_draft_recommendations,
             get_champion_pool,
+            get_item_intelligence,
             get_live_game_state,
             has_api_key,
             get_post_game_analysis,

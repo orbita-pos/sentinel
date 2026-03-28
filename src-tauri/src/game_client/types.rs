@@ -13,6 +13,8 @@ pub struct ActivePlayer {
     pub current_gold: f64,
     #[serde(rename = "championStats", default)]
     pub champion_stats: serde_json::Value,
+    #[serde(rename = "fullRunes", default)]
+    pub full_runes: serde_json::Value,
 }
 
 /// Player data from /liveclientdata/playerlist
