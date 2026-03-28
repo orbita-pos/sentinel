@@ -87,10 +87,56 @@
   interface ItemRec {
     id: number;
     name: string;
+    cost: number;
     reason: string;
-    tag: string; // RUSH, BUY, CONSIDER, SKIP
+    tag: string;
     tagColor: string;
     category: "offensive" | "defensive" | "boots" | "utility";
+    buildsFrom: { id: number; name: string; cost: number }[];
+  }
+
+  // ── Item cost + recipe database ──
+  const ITEM_DATA: Record<number, { cost: number; from: { id: number; n: string; c: number }[] }> = {
+    // Boots
+    3006: { cost: 1100, from: [{ id: 1001, n: "Boots", c: 300 }] },
+    3009: { cost: 900, from: [{ id: 1001, n: "Boots", c: 300 }] },
+    3020: { cost: 1100, from: [{ id: 1001, n: "Boots", c: 300 }] },
+    3047: { cost: 1100, from: [{ id: 1001, n: "Boots", c: 300 }, { id: 1029, n: "Cloth Armor", c: 300 }] },
+    3111: { cost: 1100, from: [{ id: 1001, n: "Boots", c: 300 }, { id: 1033, n: "Null-Magic Mantle", c: 450 }] },
+    // AD
+    3031: { cost: 3400, from: [{ id: 1038, n: "B.F. Sword", c: 1300 }, { id: 1018, n: "Cloak of Agility", c: 600 }] },
+    3072: { cost: 3400, from: [{ id: 1038, n: "B.F. Sword", c: 1300 }, { id: 1053, n: "Vampiric Scepter", c: 900 }] },
+    3036: { cost: 3000, from: [{ id: 3035, n: "Last Whisper", c: 1450 }] },
+    3033: { cost: 3000, from: [{ id: 3035, n: "Last Whisper", c: 1450 }, { id: 2015, n: "Executioner's", c: 800 }] },
+    3074: { cost: 3300, from: [{ id: 3077, n: "Tiamat", c: 1200 }, { id: 1053, n: "Vampiric Scepter", c: 900 }] },
+    3071: { cost: 3100, from: [{ id: 3133, n: "Caulfield's Warhammer", c: 1100 }, { id: 3067, n: "Kindlegem", c: 800 }] },
+    3142: { cost: 2800, from: [{ id: 3134, n: "Serrated Dirk", c: 1100 }] },
+    6676: { cost: 3000, from: [{ id: 3134, n: "Serrated Dirk", c: 1100 }, { id: 1018, n: "Cloak of Agility", c: 600 }] },
+    6694: { cost: 3200, from: [{ id: 3035, n: "Last Whisper", c: 1450 }, { id: 3133, n: "Caulfield's Warhammer", c: 1100 }] },
+    3046: { cost: 2600, from: [{ id: 1042, n: "Dagger", c: 300 }, { id: 3086, n: "Zeal", c: 1050 }] },
+    3161: { cost: 3400, from: [{ id: 3133, n: "Caulfield's Warhammer", c: 1100 }, { id: 3067, n: "Kindlegem", c: 800 }] },
+    6333: { cost: 3300, from: [{ id: 3133, n: "Caulfield's Warhammer", c: 1100 }, { id: 1037, n: "Pickaxe", c: 875 }] },
+    // AP
+    3089: { cost: 3600, from: [{ id: 1058, n: "Needlessly Large Rod", c: 1250 }] },
+    3157: { cost: 2600, from: [{ id: 3191, n: "Seeker's Armguard", c: 1000 }, { id: 3108, n: "Fiendish Codex", c: 900 }] },
+    3116: { cost: 2600, from: [{ id: 1052, n: "Amplifying Tome", c: 435 }, { id: 1028, n: "Ruby Crystal", c: 400 }] },
+    4645: { cost: 2800, from: [{ id: 1058, n: "Needlessly Large Rod", c: 1250 }] },
+    3165: { cost: 2500, from: [{ id: 3916, n: "Oblivion Orb", c: 800 }, { id: 1026, n: "Blasting Wand", c: 850 }] },
+    // Defensive
+    4401: { cost: 2800, from: [{ id: 1057, n: "Negatron Cloak", c: 900 }, { id: 1028, n: "Ruby Crystal", c: 400 }] },
+    3194: { cost: 2900, from: [{ id: 1057, n: "Negatron Cloak", c: 900 }, { id: 1028, n: "Ruby Crystal", c: 400 }] },
+    3102: { cost: 2500, from: [{ id: 1058, n: "Needlessly Large Rod", c: 1250 }, { id: 1033, n: "Null-Magic Mantle", c: 450 }] },
+    3065: { cost: 2900, from: [{ id: 3211, n: "Spectre's Cowl", c: 1250 }, { id: 3067, n: "Kindlegem", c: 800 }] },
+    3143: { cost: 2700, from: [{ id: 3082, n: "Warden's Mail", c: 1000 }, { id: 1011, n: "Giant's Belt", c: 900 }] },
+    3110: { cost: 2500, from: [{ id: 3082, n: "Warden's Mail", c: 1000 }, { id: 3024, n: "Glacial Buckler", c: 900 }] },
+    3075: { cost: 2700, from: [{ id: 3076, n: "Bramble Vest", c: 800 }, { id: 1011, n: "Giant's Belt", c: 900 }] },
+    3742: { cost: 2900, from: [{ id: 1031, n: "Chain Vest", c: 800 }, { id: 1028, n: "Ruby Crystal", c: 400 }] },
+    // Utility
+    6609: { cost: 2600, from: [{ id: 3134, n: "Serrated Dirk", c: 1100 }] },
+  };
+
+  function getItemData(id: number) {
+    return ITEM_DATA[id] ?? { cost: 3000, from: [] };
   }
 
   // ── Detect damage type from actual items ──
@@ -181,16 +227,21 @@
     const anyShields = threats().some(t => SHIELD_HEAVY.has(t.p.champion) && !t.weak);
     const hasAntiheal = [3165,3033,3075,3011].some(id => has.has(id));
 
+    function rec(id: number, name: string, reason: string, tag: string, tagColor: string, category: ItemRec["category"]): ItemRec {
+      const data = getItemData(id);
+      return { id, name, cost: data.cost, reason, tag, tagColor, category, buildsFrom: data.from.map(f => ({ id: f.id, name: f.n, cost: f.c })) };
+    }
+
     // ── BOOTS (if you don't have any) ──
     if (!hasBoots) {
       if (dm.adPct >= 60 || fedAD.length >= 2) {
-        recs.push({ id: 3047, name: "Plated Steelcaps", reason: `${dm.adPct}% AD threats`, tag: "BUY", tagColor: "var(--accent-blue)", category: "boots" });
+        recs.push(rec(3047, "Plated Steelcaps", `${dm.adPct}% AD threats`, "BUY", "var(--accent-blue)", "boots"));
       } else if (dm.apPct >= 60 || fedAP.length >= 2) {
-        recs.push({ id: 3111, name: "Mercury's Treads", reason: `${dm.apPct}% AP + CC threats`, tag: "BUY", tagColor: "var(--accent-blue)", category: "boots" });
+        recs.push(rec(3111, "Mercury's Treads", `${dm.apPct}% AP + CC threats`, "BUY", "var(--accent-blue)", "boots"));
       } else if (myClass === "marksman") {
-        recs.push({ id: 3006, name: "Berserker's Greaves", reason: "Attack speed for DPS", tag: "BUY", tagColor: "var(--accent-blue)", category: "boots" });
+        recs.push(rec(3006, "Berserker's Greaves", "Attack speed for DPS", "BUY", "var(--accent-blue)", "boots"));
       } else if (myClass === "mage") {
-        recs.push({ id: 3020, name: "Sorcerer's Shoes", reason: "Magic penetration", tag: "BUY", tagColor: "var(--accent-blue)", category: "boots" });
+        recs.push(rec(3020, "Sorcerer's Shoes", "Magic penetration", "BUY", "var(--accent-blue)", "boots"));
       }
     }
 
@@ -204,7 +255,7 @@
       ];
       const pick = mrItems.find(i => !has.has(i.id) && !recs.some(r => r.id === i.id));
       if (pick) {
-        recs.push({ id: pick.id, name: pick.n, reason: `${t.p.champion} is ${t.p.kills}/${t.p.deaths} (AP) -- ${pick.r}`, tag: "RUSH", tagColor: "var(--accent-red)", category: "defensive" });
+        recs.push(rec(pick.id, pick.n, `${t.p.champion} is ${t.p.kills}/${t.p.deaths} (AP) -- ${pick.r}`, "RUSH", "var(--accent-red)", "defensive"));
         break;
       }
     }
@@ -217,7 +268,7 @@
       ];
       const pick = armorItems.find(i => !has.has(i.id) && !recs.some(r => r.id === i.id));
       if (pick) {
-        recs.push({ id: pick.id, name: pick.n, reason: `${t.p.champion} is ${t.p.kills}/${t.p.deaths} (AD) -- ${pick.r}`, tag: "RUSH", tagColor: "var(--accent-red)", category: "defensive" });
+        recs.push(rec(pick.id, pick.n, `${t.p.champion} is ${t.p.kills}/${t.p.deaths} (AD) -- ${pick.r}`, "RUSH", "var(--accent-red)", "defensive"));
         break;
       }
     }
@@ -231,7 +282,7 @@
         { id: 3072, n: "Bloodthirster", r: "Lifesteal + shield" },
       ];
       const pick = adcItems.find(i => !has.has(i.id) && !recs.some(r => r.id === i.id));
-      if (pick) recs.push({ id: pick.id, name: pick.n, reason: pick.r, tag: "CORE", tagColor: "var(--accent-green)", category: "offensive" });
+      if (pick) recs.push(rec(pick.id, pick.n, pick.r, "CORE", "var(--accent-green)", "offensive"));
     } else if (myClass === "mage" || myClass === "support") {
       const mageItems = [
         { id: 3089, n: "Rabadon's Deathcap", r: "Max AP damage" },
@@ -240,7 +291,7 @@
         { id: 4645, n: "Shadowflame", r: "Magic pen vs squishies" },
       ];
       const pick = mageItems.find(i => !has.has(i.id) && !recs.some(r => r.id === i.id));
-      if (pick) recs.push({ id: pick.id, name: pick.n, reason: pick.r, tag: "CORE", tagColor: "var(--accent-green)", category: "offensive" });
+      if (pick) recs.push(rec(pick.id, pick.n, pick.r, "CORE", "var(--accent-green)", "offensive"));
     } else if (myClass === "assassin") {
       const assItems = [
         { id: 6676, n: "The Collector", r: "Execute + lethality" },
@@ -248,7 +299,7 @@
         { id: 6694, n: "Serylda's Grudge", r: "Armor pen + slow" },
       ];
       const pick = assItems.find(i => !has.has(i.id) && !recs.some(r => r.id === i.id));
-      if (pick) recs.push({ id: pick.id, name: pick.n, reason: pick.r, tag: "CORE", tagColor: "var(--accent-green)", category: "offensive" });
+      if (pick) recs.push(rec(pick.id, pick.n, pick.r, "CORE", "var(--accent-green)", "offensive"));
     } else if (myClass === "fighter") {
       const fItems = [
         { id: 3074, n: "Ravenous Hydra", r: "Lifesteal + wave clear" },
@@ -257,46 +308,57 @@
         { id: 6333, n: "Death's Dance", r: "Damage delay + heal on kill" },
       ];
       const pick = fItems.find(i => !has.has(i.id) && !recs.some(r => r.id === i.id));
-      if (pick) recs.push({ id: pick.id, name: pick.n, reason: pick.r, tag: "CORE", tagColor: "var(--accent-green)", category: "offensive" });
+      if (pick) recs.push(rec(pick.id, pick.n, pick.r, "CORE", "var(--accent-green)", "offensive"));
     }
 
     // ── UTILITY: Anti-heal ──
     if (anyHeals && !hasAntiheal) {
       const healChamps = threats().filter(t => t.heals && !t.weak).map(t => t.p.champion).join(", ");
       if (myClass === "mage" || myClass === "support") {
-        recs.push({ id: 3165, name: "Morellonomicon", reason: `Anti-heal for ${healChamps}`, tag: "BUY", tagColor: "var(--accent-blue)", category: "utility" });
+        recs.push(rec(3165, "Morellonomicon", `Anti-heal for ${healChamps}`, "BUY", "var(--accent-blue)", "utility"));
       } else {
-        recs.push({ id: 3033, name: "Mortal Reminder", reason: `Anti-heal for ${healChamps}`, tag: "BUY", tagColor: "var(--accent-blue)", category: "utility" });
+        recs.push(rec(3033, "Mortal Reminder", `Anti-heal for ${healChamps}`, "BUY", "var(--accent-blue)", "utility"));
       }
     }
 
     // ── UTILITY: Anti-shield ──
     if (anyShields && !has.has(6609)) {
-      recs.push({ id: 6609, name: "Serpent's Fang", reason: `Shield breaker vs ${threats().filter(t => SHIELD_HEAVY.has(t.p.champion)).map(t => t.p.champion).join(", ")}`, tag: "CONSIDER", tagColor: "var(--text-muted)", category: "utility" });
+      recs.push(rec(6609, "Serpent's Fang", `Shield breaker vs ${threats().filter(t => SHIELD_HEAVY.has(t.p.champion)).map(t => t.p.champion).join(", ")}`, "CONSIDER", "var(--text-muted)", "utility"));
     }
 
     return recs.slice(0, 6);
   });
 
-  // ── "You can buy" based on current gold ──
-  let affordableNow = $derived((): { id: number; name: string; cost: number }[] => {
-    const affordable: { id: number; name: string; cost: number }[] = [];
-    // Common components by price
-    const components = [
-      { id: 1038, name: "B.F. Sword", cost: 1300 },
-      { id: 1058, name: "Needlessly Large Rod", cost: 1250 },
-      { id: 1037, name: "Pickaxe", cost: 875 },
-      { id: 1026, name: "Blasting Wand", cost: 850 },
-      { id: 1036, name: "Long Sword", cost: 350 },
-      { id: 1052, name: "Amplifying Tome", cost: 435 },
-      { id: 2055, name: "Control Ward", cost: 75 },
-      { id: 1055, name: "Doran's Blade", cost: 450 },
-      { id: 1056, name: "Doran's Ring", cost: 400 },
-    ];
-    for (const c of components) {
-      if (myGold >= c.cost) affordable.push(c);
+  // ── "You can buy" -- prioritize complete items, fall back to components ──
+  let affordableNow = $derived((): { id: number; name: string; cost: number; isComplete: boolean }[] => {
+    const results: { id: number; name: string; cost: number; isComplete: boolean }[] = [];
+    const gold = myGold;
+    const has = myItemIds;
+
+    // First: check recommended items you can afford complete
+    for (const r of recommendations()) {
+      if (gold >= r.cost && !has.has(r.id)) {
+        results.push({ id: r.id, name: r.name, cost: r.cost, isComplete: true });
+      }
     }
-    return affordable.slice(0, 4);
+
+    // If we can't afford any complete items, show components of recommended items
+    if (results.length === 0) {
+      for (const r of recommendations()) {
+        for (const comp of r.buildsFrom) {
+          if (gold >= comp.cost && !has.has(comp.id) && !results.some(x => x.id === comp.id)) {
+            results.push({ id: comp.id, name: `${comp.name} (for ${r.name})`, cost: comp.cost, isComplete: false });
+          }
+        }
+      }
+    }
+
+    // Always suggest Control Ward if affordable
+    if (gold >= 75 && !results.some(r => r.id === 2055)) {
+      results.push({ id: 2055, name: "Control Ward", cost: 75, isComplete: false });
+    }
+
+    return results.slice(0, 5);
   });
 
   // ── Helpers ──
@@ -379,19 +441,43 @@
     <div class="rounded-xl border p-4" style="background: var(--bg-secondary); border-color: var(--border)">
       <p class="mb-3 text-[10px] font-bold uppercase tracking-wide" style="color: var(--accent-purple)">Recommended Items</p>
       <div class="space-y-2">
-        {#each recommendations() as rec}
-          <div class="flex items-center gap-3 rounded-lg px-3 py-2.5" style="background: var(--bg-tertiary)">
-            <div class="h-9 w-9 shrink-0 overflow-hidden rounded-lg" style="background: var(--bg-primary)">
-              <img src={itemImg(rec.id)} alt={rec.name} class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
-            </div>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-semibold" style="color: var(--text-primary)">{rec.name}</span>
-                <span class="rounded px-1.5 py-0.5 text-[9px] font-bold" style="color: {rec.tagColor}">{rec.tag}</span>
-                <span class="rounded px-1 py-0.5 text-[9px]" style="background: var(--bg-primary); color: var(--text-muted)">{rec.category}</span>
+        {#each recommendations() as r}
+          <div class="rounded-lg px-3 py-2.5" style="background: var(--bg-tertiary)">
+            <div class="flex items-center gap-3">
+              <div class="h-10 w-10 shrink-0 overflow-hidden rounded-lg" style="background: var(--bg-primary); border: 2px solid {r.tagColor}">
+                <img src={itemImg(r.id)} alt={r.name} class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
               </div>
-              <p class="text-[10px] mt-0.5" style="color: var(--text-muted)">{rec.reason}</p>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-bold" style="color: var(--text-primary)">{r.name}</span>
+                  <span class="rounded px-1.5 py-0.5 text-[9px] font-bold" style="color: {r.tagColor}">{r.tag}</span>
+                  <span class="text-[10px] font-medium" style="color: var(--accent-gold)">{fmtGold(r.cost)}</span>
+                  {#if myGold >= r.cost}
+                    <span class="rounded px-1 py-0.5 text-[8px] font-bold" style="background: var(--accent-green); color: white">CAN BUY</span>
+                  {/if}
+                </div>
+                <p class="text-[10px] mt-0.5" style="color: var(--text-muted)">{r.reason}</p>
+              </div>
             </div>
+            <!-- Recipe: builds from -->
+            {#if r.buildsFrom.length > 0}
+              <div class="mt-2 flex items-center gap-1.5 pl-1">
+                <span class="text-[9px]" style="color: var(--text-muted)">Recipe:</span>
+                {#each r.buildsFrom as comp}
+                  <div class="flex items-center gap-1 rounded px-1.5 py-0.5" style="background: var(--bg-primary)">
+                    <div class="h-4 w-4 overflow-hidden rounded">
+                      <img src={itemImg(comp.id)} alt={comp.name} class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
+                    </div>
+                    <span class="text-[9px]" style="color: {myItemIds.has(comp.id) ? 'var(--accent-green)' : 'var(--text-muted)'}">{comp.name}</span>
+                    {#if myItemIds.has(comp.id)}
+                      <span class="text-[8px]" style="color: var(--accent-green)">OK</span>
+                    {:else}
+                      <span class="text-[8px]" style="color: var(--accent-gold)">{comp.cost}g</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -399,17 +485,27 @@
   {/if}
 
   <!-- ═══ YOU CAN BUY NOW ═══ -->
-  {#if myGold >= 300 && affordableNow().length > 0}
+  {#if myGold >= 75 && affordableNow().length > 0}
     <div class="rounded-xl border p-4" style="background: var(--bg-secondary); border-color: var(--border)">
-      <p class="mb-2 text-[10px] font-bold uppercase tracking-wide" style="color: var(--accent-gold)">You can buy now ({Math.floor(myGold)}g)</p>
+      <p class="mb-2 text-[10px] font-bold uppercase tracking-wide" style="color: var(--accent-gold)">
+        On your next back ({Math.floor(myGold)}g available)
+      </p>
       <div class="flex flex-wrap gap-2">
         {#each affordableNow() as c}
-          <div class="flex items-center gap-1.5 rounded-lg px-2 py-1.5" style="background: var(--bg-tertiary)" title={c.name}>
-            <div class="h-6 w-6 overflow-hidden rounded" style="background: var(--bg-primary)">
+          <div
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
+            style="background: var(--bg-tertiary); {c.isComplete ? 'border: 1px solid var(--accent-green)' : ''}"
+          >
+            <div class="h-7 w-7 overflow-hidden rounded" style="background: var(--bg-primary)">
               <img src={itemImg(c.id)} alt={c.name} class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
             </div>
-            <span class="text-[10px] font-medium" style="color: var(--text-primary)">{c.name}</span>
-            <span class="text-[9px]" style="color: var(--accent-gold)">{c.cost}g</span>
+            <div>
+              <span class="text-[10px] font-medium" style="color: var(--text-primary)">{c.name}</span>
+              {#if c.isComplete}
+                <span class="ml-1 text-[8px] font-bold" style="color: var(--accent-green)">COMPLETE</span>
+              {/if}
+            </div>
+            <span class="text-[9px] font-medium" style="color: var(--accent-gold)">{fmtGold(c.cost)}</span>
           </div>
         {/each}
       </div>
