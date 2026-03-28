@@ -576,6 +576,45 @@ fn create_improvement_goal(
     Ok(serde_json::json!({ "id": id }))
 }
 
+// ── Mini Overlay Window ───────────────────────────────────
+
+#[tauri::command]
+async fn open_mini_overlay(app_handle: tauri::AppHandle) -> Result<(), String> {
+    use tauri::WebviewWindowBuilder;
+
+    // Check if already open
+    if app_handle.get_webview_window("mini-overlay").is_some() {
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(
+        &app_handle,
+        "mini-overlay",
+        tauri::WebviewUrl::App("/mini".into()),
+    )
+    .title("Sentinel")
+    .inner_size(320.0, 480.0)
+    .min_inner_size(280.0, 300.0)
+    .resizable(true)
+    .always_on_top(true)
+    .decorations(false)
+    .transparent(true)
+    .skip_taskbar(true)
+    .position(50.0, 50.0)
+    .build()
+    .map_err(|e| safe_err("Open mini overlay", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn close_mini_overlay(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("mini-overlay") {
+        window.close().map_err(|e| safe_err("Close overlay", e))?;
+    }
+    Ok(())
+}
+
 // ── App Setup ─────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -759,6 +798,8 @@ pub fn run() {
             get_item_intelligence,
             get_opgg_build,
             get_live_game_state,
+            open_mini_overlay,
+            close_mini_overlay,
             has_api_key,
             get_post_game_analysis,
             get_detected_patterns,

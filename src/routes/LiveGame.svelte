@@ -5,9 +5,14 @@
   import PowerSpikeAlert from "../lib/components/live/PowerSpikeAlert.svelte";
   import ObjectiveTimers from "../lib/components/live/ObjectiveTimers.svelte";
   import PlayerTab from "../lib/components/live/PlayerTab.svelte";
+  import { invoke } from "@tauri-apps/api/core";
 
   let state = $derived($liveGameState);
   let activeTab: "overview" | "player" = $state("overview");
+
+  function openMiniOverlay() {
+    invoke("open_mini_overlay").catch(e => console.error("Failed to open overlay:", e));
+  }
 
   // Community Dragon CDN for objective icons
   const CDN = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-match-history/global/default";
@@ -126,7 +131,7 @@
     </div>
 
     <!-- Tab Buttons -->
-    <div class="mb-4 flex gap-2">
+    <div class="mb-4 flex items-center gap-2">
       <button
         onclick={() => activeTab = "overview"}
         class="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
@@ -137,6 +142,18 @@
         class="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
         style="background: {activeTab === 'player' ? 'var(--accent-purple)' : 'var(--bg-tertiary)'}; color: {activeTab === 'player' ? 'white' : 'var(--text-secondary)'}"
       >Player Advice</button>
+
+      <button
+        onclick={openMiniOverlay}
+        class="ml-auto flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+        style="background: var(--bg-tertiary); color: var(--text-secondary)"
+        title="Open floating mini window (stays on top of League)"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
+        </svg>
+        Mini Overlay
+      </button>
     </div>
 
     {#if activeTab === "overview"}
