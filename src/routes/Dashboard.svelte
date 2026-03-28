@@ -90,9 +90,12 @@
 </script>
 
 <div class="mx-auto max-w-4xl">
-  <div class="mb-8">
-    <h2 class="text-2xl font-bold" style="color: var(--text-primary)">Dashboard</h2>
-    <p class="mt-1 text-sm" style="color: var(--text-secondary)">Personal gameplay intelligence for League of Legends</p>
+  <div class="mb-8 flex items-center gap-4">
+    <img src="/logo.png" alt="Sentinel" class="h-12 w-12 rounded-xl" />
+    <div>
+      <h2 class="text-2xl font-bold" style="color: var(--text-primary)">Sentinel</h2>
+      <p class="mt-0.5 text-sm" style="color: var(--text-secondary)">Personal gameplay intelligence for League of Legends</p>
+    </div>
   </div>
 
   <!-- Status Cards -->

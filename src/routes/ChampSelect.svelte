@@ -41,11 +41,10 @@
   </div>
 
   {#if !session}
-    <div class="flex h-64 items-center justify-center rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
-      <div class="text-center">
-        <p class="text-sm" style="color: var(--text-secondary)">Enter champion select to see draft data</p>
-        <p class="mt-1 text-xs" style="color: var(--text-muted)">Sentinel will auto-navigate here when you enter champ select</p>
-      </div>
+    <div class="flex h-64 flex-col items-center justify-center rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
+      <img src="/logo.png" alt="Sentinel" class="mb-4 h-16 w-16 rounded-xl opacity-40" />
+      <p class="text-sm" style="color: var(--text-secondary)">Enter champion select to see draft data</p>
+      <p class="mt-1 text-xs" style="color: var(--text-muted)">Sentinel will auto-navigate here when you enter champ select</p>
     </div>
   {:else}
     <!-- Bans -->

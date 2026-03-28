@@ -52,11 +52,10 @@
 
 <div class="mx-auto max-w-5xl">
   {#if !state}
-    <div class="flex h-64 items-center justify-center rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
-      <div class="text-center">
-        <p class="text-lg font-semibold" style="color: var(--text-secondary)">Waiting for game to start...</p>
-        <p class="mt-2 text-xs" style="color: var(--text-muted)">Sentinel will auto-navigate here when the game starts</p>
-      </div>
+    <div class="flex h-64 flex-col items-center justify-center rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
+      <img src="/logo.png" alt="Sentinel" class="mb-4 h-16 w-16 rounded-xl opacity-40" />
+      <p class="text-lg font-semibold" style="color: var(--text-secondary)">Waiting for game to start...</p>
+      <p class="mt-2 text-xs" style="color: var(--text-muted)">Sentinel will auto-navigate here when the game starts</p>
     </div>
   {:else}
     <!-- ═══ ESPORTS SCOREBAR ═══ -->

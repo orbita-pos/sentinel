@@ -35,9 +35,7 @@
 <nav class="flex h-full w-56 flex-col border-r" style="background: var(--bg-secondary); border-color: var(--border)">
   <!-- Logo -->
   <div class="flex h-14 items-center gap-3 border-b px-5" style="border-color: var(--border)">
-    <div class="flex h-8 w-8 items-center justify-center rounded-lg" style="background: var(--accent-blue)">
-      <span class="text-sm font-bold text-white">S</span>
-    </div>
+    <img src="/logo-small.png" alt="Sentinel" class="h-8 w-8 rounded-lg" />
     <div>
       <h1 class="text-sm font-semibold" style="color: var(--text-primary)">Sentinel</h1>
       <p class="text-[10px]" style="color: var(--text-muted)">LoL Intelligence</p>
