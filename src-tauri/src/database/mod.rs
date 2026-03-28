@@ -207,6 +207,57 @@ impl Database {
         }
         Ok(())
     }
+
+    /// Get personal champion pool stats for a player (win rate, games played per champion)
+    pub fn get_champion_pool(&self, puuid: &str, min_games: i32) -> Result<Vec<ChampionPoolEntry>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT mp.champion_id, mp.champion_name,
+                    COUNT(*) as games,
+                    SUM(mp.win) as wins,
+                    AVG(mp.kills) as avg_kills,
+                    AVG(mp.deaths) as avg_deaths,
+                    AVG(mp.assists) as avg_assists,
+                    AVG(mp.total_minions_killed) as avg_cs
+             FROM match_participants mp
+             JOIN matches m ON m.match_id = mp.match_id
+             WHERE mp.puuid = ?1
+             GROUP BY mp.champion_id, mp.champion_name
+             HAVING games >= ?2
+             ORDER BY games DESC"
+        )?;
+        let rows = stmt.query_map(rusqlite::params![puuid, min_games], |row| {
+            let games: i64 = row.get(2)?;
+            let wins: i64 = row.get(3)?;
+            Ok(ChampionPoolEntry {
+                champion_id: row.get(0)?,
+                champion_name: row.get(1)?,
+                games,
+                wins,
+                win_rate: if games > 0 { wins as f64 / games as f64 } else { 0.0 },
+                avg_kills: row.get(4)?,
+                avg_deaths: row.get(5)?,
+                avg_assists: row.get(6)?,
+                avg_cs: row.get(7)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    /// Get champion name by ID from static data
+    pub fn get_champion_name(&self, champion_id: i64) -> Result<Option<String>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let result = conn.query_row(
+            "SELECT name FROM champions WHERE champion_id = ?1",
+            [champion_id],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(name) => Ok(Some(name)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
 }
 
 /// Row data for inserting a match participant
@@ -245,4 +296,18 @@ pub struct MatchSummary {
     pub vision_score: i64,
     pub win: bool,
     pub role: Option<String>,
+}
+
+/// Champion pool entry with aggregated stats
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ChampionPoolEntry {
+    pub champion_id: i64,
+    pub champion_name: String,
+    pub games: i64,
+    pub wins: i64,
+    pub win_rate: f64,
+    pub avg_kills: f64,
+    pub avg_deaths: f64,
+    pub avg_assists: f64,
+    pub avg_cs: f64,
 }

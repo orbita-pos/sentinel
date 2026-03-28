@@ -107,3 +107,15 @@ CREATE TABLE IF NOT EXISTS player_profiles (
     updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 ";
+
+/// Migration 004: Champion mastery cache
+pub const MIGRATION_004_MASTERY: &str = "
+CREATE TABLE IF NOT EXISTS champion_mastery (
+    puuid               TEXT NOT NULL,
+    champion_id         INTEGER NOT NULL,
+    mastery_level       INTEGER NOT NULL DEFAULT 0,
+    mastery_points      INTEGER NOT NULL DEFAULT 0,
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (puuid, champion_id)
+);
+";

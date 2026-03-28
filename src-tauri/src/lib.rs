@@ -1,3 +1,4 @@
+mod analysis;
 mod database;
 mod error;
 mod lcu;
@@ -5,7 +6,6 @@ mod riot_api;
 
 // Phase 5+
 // mod game_client;
-// mod analysis;
 
 use std::sync::Arc;
 
@@ -135,6 +135,36 @@ async fn trigger_backfill(
     Ok(serde_json::json!({ "fetched": count }))
 }
 
+#[tauri::command]
+fn get_champ_select_session(
+    lcu: tauri::State<'_, Arc<LcuManager>>,
+) -> Result<serde_json::Value, String> {
+    match lcu.get_champ_select() {
+        Some(session) => serde_json::to_value(&session).map_err(|e| e.to_string()),
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+#[tauri::command]
+fn get_draft_recommendations(
+    puuid: String,
+    lcu: tauri::State<'_, Arc<LcuManager>>,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    let session = lcu.get_champ_select().ok_or("Not in champion select")?;
+    let recs = analysis::draft::get_recommendations(&session, db.inner(), &puuid);
+    serde_json::to_value(&recs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_champion_pool(
+    puuid: String,
+    db: tauri::State<'_, Arc<Database>>,
+) -> Result<serde_json::Value, String> {
+    let pool = db.get_champion_pool(&puuid, 1).map_err(|e| e.to_string())?;
+    serde_json::to_value(&pool).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -198,6 +228,9 @@ pub fn run() {
             set_region,
             get_match_history,
             trigger_backfill,
+            get_champ_select_session,
+            get_draft_recommendations,
+            get_champion_pool,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Sentinel");

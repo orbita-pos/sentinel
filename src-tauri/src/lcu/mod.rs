@@ -1,3 +1,4 @@
+pub mod champ_select;
 pub mod connector;
 pub mod lockfile;
 pub mod tls;
@@ -9,6 +10,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast;
 
+use self::champ_select::ChampSelectSession;
 use self::connector::LcuClient;
 use self::types::{ConnectionState, GameFlowPhase, LcuEvent, LcuSummoner};
 
@@ -20,6 +22,7 @@ pub struct LcuManager {
     app_handle: AppHandle,
     event_tx: broadcast::Sender<LcuEvent>,
     state: Arc<Mutex<ConnectionState>>,
+    champ_select_session: Arc<Mutex<Option<ChampSelectSession>>>,
 }
 
 impl LcuManager {
@@ -34,6 +37,7 @@ impl LcuManager {
             app_handle,
             event_tx,
             state,
+            champ_select_session: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -45,6 +49,11 @@ impl LcuManager {
     /// Get current connection state (for Tauri commands)
     pub fn get_state(&self) -> ConnectionState {
         self.state.lock().unwrap().clone()
+    }
+
+    /// Get current champ select session (if in ChampSelect phase)
+    pub fn get_champ_select(&self) -> Option<ChampSelectSession> {
+        self.champ_select_session.lock().unwrap().clone()
     }
 
     /// Main loop: detect client → connect → maintain → reconnect
@@ -108,6 +117,7 @@ impl LcuManager {
             // Also listen to our own events to update internal state
             let mut state_rx = self.event_tx.subscribe();
             let state_ref = self.state.clone();
+            let cs_ref = self.champ_select_session.clone();
             let app_handle = self.app_handle.clone();
 
             // Spawn state updater that forwards events to frontend
@@ -116,20 +126,41 @@ impl LcuManager {
                     match state_rx.recv().await {
                         Ok(event) => {
                             // Update internal state
-                            if let Ok(mut state) = state_ref.lock() {
-                                match &event {
-                                    LcuEvent::GameFlowChanged { phase } => {
+                            match &event {
+                                LcuEvent::GameFlowChanged { phase } => {
+                                    if let Ok(mut state) = state_ref.lock() {
                                         state.game_phase = phase.as_str().to_string();
                                     }
-                                    LcuEvent::Disconnected => {
+                                    // Clear champ select when leaving that phase
+                                    if *phase != GameFlowPhase::ChampSelect {
+                                        if let Ok(mut cs) = cs_ref.lock() {
+                                            *cs = None;
+                                        }
+                                    }
+                                }
+                                LcuEvent::ChampSelectUpdate { data } => {
+                                    // Parse and store champ select session
+                                    if let Some(session) = champ_select::parse_session(data, None) {
+                                        // Emit parsed session to frontend
+                                        let _ = app_handle.emit("champ-select-update", &session);
+                                        if let Ok(mut cs) = cs_ref.lock() {
+                                            *cs = Some(session);
+                                        }
+                                    }
+                                }
+                                LcuEvent::Disconnected => {
+                                    if let Ok(mut state) = state_ref.lock() {
                                         state.status = "disconnected".to_string();
                                         state.summoner = None;
                                         state.game_phase = "None".to_string();
                                     }
-                                    _ => {}
+                                    if let Ok(mut cs) = cs_ref.lock() {
+                                        *cs = None;
+                                    }
                                 }
+                                _ => {}
                             }
-                            // Forward to frontend
+                            // Forward raw event to frontend
                             let _ = app_handle.emit("lcu-event", &event);
                         }
                         Err(broadcast::error::RecvError::Lagged(n)) => {
