@@ -95,6 +95,23 @@
   function itemImg(id: number) { return `https://ddragon.leagueoflegends.com/cdn/${patch}/img/item/${id}.png`; }
   function fmtGold(g: number) { return g >= 1000 ? (g/1000).toFixed(1)+"k" : g.toString(); }
 
+  // Determine skill max priority from skill order (e.g., Q > W > E)
+  function getSkillPriority(order: string[]): string[] | null {
+    if (!order || order.length < 10) return null;
+    const counts: Record<string, number[]> = { Q: [], W: [], E: [] };
+    order.forEach((s, i) => {
+      const upper = s.toUpperCase();
+      if (counts[upper]) counts[upper].push(i);
+    });
+    // The skill maxed first = appears most in first 9 levels (excluding R)
+    const skills = ["Q", "W", "E"];
+    const maxed = skills
+      .map(s => ({ s, first5: counts[s]?.filter(i => i < 9).length ?? 0 }))
+      .sort((a, b) => b.first5 - a.first5)
+      .map(x => x.s);
+    return maxed.length === 3 ? maxed : null;
+  }
+
   const threatColors: Record<string, string> = { HIGH: "var(--accent-red)", MED: "var(--accent-gold)", LOW: "var(--accent-green)" };
   const threatBg: Record<string, string> = { HIGH: "rgba(239,68,68,0.08)", MED: "rgba(234,179,8,0.06)", LOW: "rgba(34,197,94,0.06)" };
   const tagColors: Record<string, string> = { RUSH: "var(--accent-red)", CORE: "var(--accent-green)", BUY: "var(--accent-blue)", CONSIDER: "var(--text-muted)" };
@@ -212,17 +229,91 @@
         </div>
       {/if}
 
-      <!-- Runes -->
-      {#if opggBuild.runes?.primary_tree}
-        <div class="mt-3 flex items-center gap-2 border-t pt-2" style="border-color: var(--border)">
-          <span class="text-[9px] font-medium" style="color: var(--text-muted)">Runes:</span>
-          <span class="rounded px-1.5 py-0.5 text-[9px] font-medium" style="background: var(--bg-tertiary); color: var(--accent-purple)">{opggBuild.runes.primary_tree}</span>
-          {#if opggBuild.runes.secondary_tree}
-            <span class="text-[9px]" style="color: var(--text-muted)">+</span>
-            <span class="rounded px-1.5 py-0.5 text-[9px]" style="background: var(--bg-tertiary); color: var(--text-secondary)">{opggBuild.runes.secondary_tree}</span>
+      <!-- Runes + Skill Order -->
+      {#if opggBuild.runes?.primary_tree || opggBuild.skill_order?.length > 0}
+        <div class="mt-3 border-t pt-3" style="border-color: var(--border)">
+          <!-- Rune Trees -->
+          {#if opggBuild.runes?.primary_tree}
+            <div class="mb-2">
+              <div class="flex items-center gap-2 mb-1.5">
+                <span class="text-[9px] font-bold uppercase" style="color: var(--accent-purple)">Runes</span>
+                {#if opggBuild.runes.win_rate > 0}
+                  <span class="rounded px-1.5 py-0.5 text-[8px] font-bold" style="background: var(--accent-green); color: white">
+                    {(opggBuild.runes.win_rate * 100).toFixed(0)}% WR
+                  </span>
+                {/if}
+              </div>
+              <div class="flex gap-4">
+                <!-- Primary tree -->
+                <div>
+                  <span class="text-[9px] font-medium" style="color: var(--accent-purple)">{opggBuild.runes.primary_tree}</span>
+                  {#if opggBuild.runes.primary_runes?.length > 0}
+                    <div class="mt-1 space-y-0.5">
+                      {#each opggBuild.runes.primary_runes as rune, i}
+                        <div class="flex items-center gap-1.5">
+                          <div class="h-1.5 w-1.5 rounded-full" style="background: {i === 0 ? 'var(--accent-gold)' : 'var(--accent-purple)'}"></div>
+                          <span class="text-[9px]" style="color: {i === 0 ? 'var(--accent-gold)' : 'var(--text-secondary)'}">{rune}</span>
+                          {#if i === 0}
+                            <span class="text-[7px] font-bold" style="color: var(--accent-gold)">KEY</span>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+                <!-- Secondary tree -->
+                {#if opggBuild.runes.secondary_tree}
+                  <div>
+                    <span class="text-[9px] font-medium" style="color: var(--text-secondary)">{opggBuild.runes.secondary_tree}</span>
+                    {#if opggBuild.runes.secondary_runes?.length > 0}
+                      <div class="mt-1 space-y-0.5">
+                        {#each opggBuild.runes.secondary_runes as rune}
+                          <div class="flex items-center gap-1.5">
+                            <div class="h-1.5 w-1.5 rounded-full" style="background: var(--text-muted)"></div>
+                            <span class="text-[9px]" style="color: var(--text-muted)">{rune}</span>
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            </div>
           {/if}
-          {#if opggBuild.runes.win_rate > 0}
-            <span class="text-[9px]" style="color: var(--accent-green)">{(opggBuild.runes.win_rate * 100).toFixed(1)}% WR</span>
+
+          <!-- Skill Order -->
+          {#if opggBuild.skill_order?.length > 0}
+            <div>
+              <span class="text-[9px] font-bold uppercase" style="color: var(--accent-blue)">Skill Order</span>
+              <div class="mt-1 flex gap-1">
+                {#each opggBuild.skill_order.slice(0, 18) as skill, i}
+                  {@const isQ = skill === "Q" || skill === "q"}
+                  {@const isW = skill === "W" || skill === "w"}
+                  {@const isE = skill === "E" || skill === "e"}
+                  {@const isR = skill === "R" || skill === "r"}
+                  <div class="flex flex-col items-center" style="width: 16px">
+                    <span class="text-[7px]" style="color: var(--text-muted)">{i + 1}</span>
+                    <span
+                      class="flex h-4 w-4 items-center justify-center rounded text-[8px] font-bold"
+                      style="background: {isR ? 'var(--accent-gold)' : isQ ? 'var(--accent-blue)' : isW ? 'var(--accent-green)' : isE ? 'var(--accent-purple)' : 'var(--bg-primary)'}; color: white"
+                    >{skill.toUpperCase()}</span>
+                  </div>
+                {/each}
+              </div>
+              <!-- Skill max priority -->
+              {#if getSkillPriority(opggBuild.skill_order)}
+              {@const priorities = getSkillPriority(opggBuild.skill_order)!}
+                <div class="mt-1 flex items-center gap-1">
+                  <span class="text-[9px]" style="color: var(--text-muted)">Max:</span>
+                  {#each priorities as skill, i}
+                    <span class="text-[9px] font-bold" style="color: var(--text-primary)">{skill}</span>
+                    {#if i < priorities.length - 1}
+                      <span class="text-[8px]" style="color: var(--text-muted)">></span>
+                    {/if}
+                  {/each}
+                </div>
+              {/if}
+            </div>
           {/if}
         </div>
       {/if}
