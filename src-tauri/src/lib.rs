@@ -446,27 +446,61 @@ fn run_pattern_analysis(
 ) -> Result<serde_json::Value, String> {
     validate_puuid(&puuid)?; // [M4]
 
-    let matches = db.get_match_history(&puuid, 200, 0).map_err(|e| safe_err("Get matches", e))?;
+    let matches = db.get_match_history(&puuid, 500, 0).map_err(|e| safe_err("Get matches", e))?;
     let mut extracted = 0;
 
     for m in &matches {
         if db.has_features(&m.match_id, &puuid).unwrap_or(true) {
             continue;
         }
-        let match_json = match db.get_match_json(&m.match_id) {
-            Ok(Some(j)) => j,
-            _ => continue,
-        };
-        let timeline_json = match db.get_timeline_json(&m.match_id) {
-            Ok(Some(j)) => j,
-            _ => continue,
-        };
-        let Ok(match_data) = serde_json::from_str::<riot_api::types::RiotMatch>(&match_json) else { continue };
-        let Ok(timeline) = serde_json::from_str::<riot_api::types::MatchTimeline>(&timeline_json) else { continue };
 
-        if let Some(features) = analysis::patterns::extract_features(&match_data, &timeline, &puuid) {
-            let fj = serde_json::to_string(&features).unwrap_or_default();
-            let _ = db.store_features(&m.match_id, &puuid, &fj);
+        // Try timeline-based extraction first (full features from Riot API)
+        let mut did_extract = false;
+        if let Ok(Some(match_json)) = db.get_match_json(&m.match_id) {
+            if let Ok(Some(tl_json)) = db.get_timeline_json(&m.match_id) {
+                if let (Ok(match_data), Ok(timeline)) = (
+                    serde_json::from_str::<riot_api::types::RiotMatch>(&match_json),
+                    serde_json::from_str::<riot_api::types::MatchTimeline>(&tl_json),
+                ) {
+                    if let Some(features) = analysis::patterns::extract_features(&match_data, &timeline, &puuid) {
+                        let fj = serde_json::to_string(&features).unwrap_or_default();
+                        let _ = db.store_features(&m.match_id, &puuid, &fj);
+                        extracted += 1;
+                        did_extract = true;
+                    }
+                }
+            }
+        }
+
+        // Fallback: extract basic features from match stats (works without timeline)
+        if !did_extract {
+            let game_duration_min = m.game_duration as f64 / 60.0;
+            if game_duration_min < 5.0 { continue; }
+
+            let vision_per_min = if game_duration_min > 0.0 {
+                m.vision_score as f64 / game_duration_min
+            } else { 0.0 };
+
+            let basic = serde_json::json!({
+                "match_id": m.match_id,
+                "champion_id": m.champion_id,
+                "champion_name": m.champion_name,
+                "role": m.role.as_deref().unwrap_or(""),
+                "win": m.win,
+                "game_duration_min": game_duration_min,
+                "cs_at_10": null,
+                "cs_at_15": null,
+                "gold_diff_at_10": null,
+                "gold_diff_at_15": null,
+                "gold_diff_at_20": null,
+                "deaths_before_15": null,
+                "deaths_after_25": null,
+                "vision_score_per_min": vision_per_min,
+                "kill_participation": 0.0,
+                "had_early_lead": false,
+                "threw_lead": false,
+            });
+            let _ = db.store_features(&m.match_id, &puuid, &basic.to_string());
             extracted += 1;
         }
     }
