@@ -11,7 +11,7 @@ use database::Database;
 use lcu::LcuManager;
 use riot_api::client::RiotApiClient;
 use riot_api::fetcher::MatchFetcher;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tokio::sync::Mutex as AsyncMutex;
 
 /// Shared state for the Riot API + fetcher (needs API key to initialize)
@@ -111,26 +111,74 @@ fn get_match_history(
 async fn trigger_backfill(
     puuid: String,
     api_state: tauri::State<'_, Arc<AsyncMutex<ApiState>>>,
+    lcu: tauri::State<'_, Arc<LcuManager>>,
+    db: tauri::State<'_, Arc<Database>>,
+    app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
+    // Try Riot API first (if key configured)
     let fetcher = {
         let state = api_state.lock().await;
         state.fetcher.clone()
     };
 
-    let fetcher = fetcher.ok_or("API key not configured")?;
+    if let Some(fetcher) = fetcher {
+        // API key path: full backfill with timelines
+        if let Err(e) = fetcher.update_static_data().await {
+            tracing::warn!("Failed to update static data: {e}");
+        }
 
-    // Update static data first
-    if let Err(e) = fetcher.update_static_data().await {
-        tracing::warn!("Failed to update static data: {e}");
+        let count = fetcher
+            .backfill(&puuid, 20)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        return Ok(serde_json::json!({ "fetched": count, "source": "riot_api" }));
     }
 
-    // Run backfill
-    let count = fetcher
-        .backfill(&puuid, 20)
+    // No API key: use LCU local match history
+    let lcu_client = lcu.get_client().ok_or("Not connected to League client")?;
+
+    let _ = app_handle.emit("backfill-progress", serde_json::json!({"current": 0, "total": 0, "match_id": "Fetching from League client..."}));
+
+    let matches = lcu_client
+        .get_match_history(&puuid, 20)
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(serde_json::json!({ "fetched": count }))
+    let mut stored = 0;
+    for m in &matches {
+        if db.has_match(&m.match_id).unwrap_or(true) {
+            continue;
+        }
+        if let Err(e) = db.store_match(
+            &m.match_id,
+            m.game_creation,
+            m.game_duration,
+            &m.game_mode,
+            m.queue_id,
+            None,
+            &m.raw_json,
+            &m.participants,
+        ) {
+            tracing::warn!("Failed to store LCU match {}: {e}", m.match_id);
+            continue;
+        }
+        stored += 1;
+    }
+
+    let _ = app_handle.emit("backfill-complete", serde_json::json!({"fetched": stored}));
+
+    tracing::info!("Stored {stored} matches from LCU (no API key)");
+    Ok(serde_json::json!({ "fetched": stored, "source": "lcu" }))
+}
+
+#[tauri::command]
+fn has_api_key(db: tauri::State<'_, Arc<Database>>) -> bool {
+    db.get_state("api_key")
+        .ok()
+        .flatten()
+        .map(|k| !k.is_empty())
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -317,6 +365,14 @@ pub fn run() {
             tracing::info!("Database initialized");
             app.manage(db.clone());
 
+            // Fetch Data Dragon static data (NO API key needed -- public CDN)
+            let ddragon_db = db.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = riot_api::ddragon::update_static_data(&ddragon_db).await {
+                    tracing::warn!("Failed to fetch Data Dragon: {e}");
+                }
+            });
+
             // Initialize API state (no fetcher until API key is set)
             let api_state = Arc::new(AsyncMutex::new(ApiState { fetcher: None }));
 
@@ -438,6 +494,7 @@ pub fn run() {
             get_draft_recommendations,
             get_champion_pool,
             get_live_game_state,
+            has_api_key,
             get_post_game_analysis,
             get_detected_patterns,
             run_pattern_analysis,

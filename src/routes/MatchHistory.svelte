@@ -78,7 +78,7 @@
     <div class="flex h-64 items-center justify-center rounded-xl border" style="background: var(--bg-secondary); border-color: var(--border)">
       <div class="text-center">
         <p class="text-sm" style="color: var(--text-secondary)">Connect to League client to see match history</p>
-        <p class="mt-1 text-xs" style="color: var(--text-muted)">Set your API key in Settings first</p>
+        <p class="mt-1 text-xs" style="color: var(--text-muted)">Sentinel will sync your matches automatically when connected</p>
       </div>
     </div>
   {:else if loading}

@@ -58,17 +58,21 @@
     <ul class="mt-3 space-y-2 text-sm" style="color: var(--text-secondary)">
       <li class="flex items-center gap-2">
         <span class="h-1.5 w-1.5 rounded-full" style="background: {status === 'connected' ? 'var(--accent-green)' : 'var(--accent-red)'}"></span>
-        {status === "connected" ? "League client detected" : "Launch League of Legends client"}
-      </li>
-      <li class="flex items-center gap-2">
-        <span class="h-1.5 w-1.5 rounded-full" style="background: var(--text-muted)"></span>
-        Set your Riot API key in Settings
+        {status === "connected" ? "League client detected -- match data syncing" : "Launch League of Legends client"}
       </li>
       <li class="flex items-center gap-2">
         <span class="h-1.5 w-1.5 rounded-full" style="background: var(--text-muted)"></span>
         Play games to build your personal data
       </li>
+      <li class="flex items-center gap-2">
+        <span class="h-1.5 w-1.5 rounded-full" style="background: var(--text-muted)"></span>
+        View patterns and improvement after 10+ games
+      </li>
     </ul>
+    <p class="mt-3 text-xs" style="color: var(--text-muted)">
+      Want deeper analysis (CS timing, gold leads, death patterns)?
+      Add an optional API key in Settings.
+    </p>
   </div>
 
   <!-- Debug Info -->

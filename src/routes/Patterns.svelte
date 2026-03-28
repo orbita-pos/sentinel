@@ -19,6 +19,11 @@
   let loading = $state(false);
   let analysisResult = $state("");
   let summoner = $derived($currentSummoner);
+  let hasKey = $state(false);
+
+  $effect(() => {
+    invoke<boolean>("has_api_key").then((v) => (hasKey = v));
+  });
 
   async function loadPatterns() {
     if (!summoner?.puuid) return;
@@ -81,6 +86,20 @@
       {analysisResult === "Running..." ? "Analyzing..." : "Run Analysis"}
     </button>
   </div>
+
+  {#if !hasKey}
+    <div class="mb-4 rounded-lg border px-4 py-3" style="background: var(--bg-tertiary); border-color: var(--accent-blue); border-left: 3px solid var(--accent-blue)">
+      <p class="text-sm font-medium" style="color: var(--text-primary)">Unlock deeper analysis</p>
+      <p class="mt-1 text-xs" style="color: var(--text-secondary)">
+        Add a free Riot API key in Settings to enable detailed timeline patterns
+        (CS timing, gold leads, death timing, lead conversion).
+        Basic patterns from match stats work without a key.
+      </p>
+      <p class="mt-1 text-xs" style="color: var(--accent-blue)">
+        Settings > Advanced: Riot API Key > developer.riotgames.com
+      </p>
+    </div>
+  {/if}
 
   {#if analysisResult && analysisResult !== "Running..."}
     <div class="mb-4 rounded-lg border px-4 py-2 text-xs" style="background: var(--bg-tertiary); border-color: var(--border); color: var(--text-muted)">

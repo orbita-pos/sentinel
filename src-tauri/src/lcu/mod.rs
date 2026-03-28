@@ -23,6 +23,7 @@ pub struct LcuManager {
     event_tx: broadcast::Sender<LcuEvent>,
     state: Arc<Mutex<ConnectionState>>,
     champ_select_session: Arc<Mutex<Option<ChampSelectSession>>>,
+    current_client: Arc<Mutex<Option<LcuClient>>>,
 }
 
 impl LcuManager {
@@ -38,6 +39,7 @@ impl LcuManager {
             event_tx,
             state,
             champ_select_session: Arc::new(Mutex::new(None)),
+            current_client: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -54,6 +56,11 @@ impl LcuManager {
     /// Get current champ select session (if in ChampSelect phase)
     pub fn get_champ_select(&self) -> Option<ChampSelectSession> {
         self.champ_select_session.lock().unwrap().clone()
+    }
+
+    /// Get the current LCU client (if connected)
+    pub fn get_client(&self) -> Option<LcuClient> {
+        self.current_client.lock().unwrap().clone()
     }
 
     /// Main loop: detect client → connect → maintain → reconnect
@@ -79,6 +86,11 @@ impl LcuManager {
             self.update_status("connecting", None, "None");
 
             let client = LcuClient::new(&lockfile);
+
+            // Store the client for external access (match history, etc.)
+            if let Ok(mut c) = self.current_client.lock() {
+                *c = Some(client.clone());
+            }
 
             // Fetch summoner and initial phase
             let summoner = match client.get_current_summoner().await {
@@ -178,6 +190,9 @@ impl LcuManager {
 
             // Cleanup
             state_task.abort();
+            if let Ok(mut c) = self.current_client.lock() {
+                *c = None;
+            }
             self.emit(LcuEvent::Disconnected);
             self.update_status("disconnected", None, "None");
             tracing::info!("League client disconnected, will retry...");
