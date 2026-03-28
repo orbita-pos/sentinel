@@ -467,6 +467,140 @@ impl Database {
         Ok(conn.last_insert_rowid())
     }
 
+    // ── Live Capture DB Methods ─────────────────────────
+
+    /// Create a new live game session
+    pub fn create_live_session(&self, session_id: &str, puuid: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        conn.execute(
+            "INSERT OR IGNORE INTO live_sessions (session_id, puuid) VALUES (?1, ?2)",
+            rusqlite::params![session_id, puuid],
+        )?;
+        Ok(())
+    }
+
+    /// Finalize a live session with game results
+    pub fn finalize_live_session(
+        &self, session_id: &str, match_id: Option<&str>, champion: &str,
+        game_mode: &str, duration: f64, win: Option<bool>,
+    ) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        conn.execute(
+            "UPDATE live_sessions SET match_id=?2, local_champion=?3, game_mode=?4,
+             game_duration=?5, win=?6, ended_at=datetime('now') WHERE session_id=?1",
+            rusqlite::params![session_id, match_id, champion, game_mode, duration, win.map(|w| w as i32)],
+        )?;
+        Ok(())
+    }
+
+    /// Store a batch of player snapshots for one tick
+    pub fn store_live_snapshots(&self, session_id: &str, snapshots: &[LiveSnapshotRow]) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        for s in snapshots {
+            conn.execute(
+                "INSERT INTO live_snapshots (session_id, game_time, player_name, champion, team, level,
+                 kills, deaths, assists, cs, ward_score, item_gold, is_local)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                rusqlite::params![
+                    session_id, s.game_time, s.player_name, s.champion, s.team,
+                    s.level, s.kills, s.deaths, s.assists, s.cs, s.ward_score,
+                    s.item_gold, s.is_local as i32
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Store a live game event
+    pub fn store_live_event(&self, session_id: &str, game_time: f64, event_name: &str, description: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        conn.execute(
+            "INSERT INTO live_game_events (session_id, game_time, event_name, description) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![session_id, game_time, event_name, description],
+        )?;
+        Ok(())
+    }
+
+    /// Get all snapshots for the local player in a session at specific minute marks
+    pub fn get_local_snapshots_at_minutes(&self, session_id: &str, minutes: &[i64]) -> Result<Vec<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut results = Vec::new();
+        for min in minutes {
+            let target_time = (*min as f64) * 60.0;
+            // Get the closest snapshot to the target time
+            let result = conn.query_row(
+                "SELECT game_time, kills, deaths, assists, cs, ward_score, item_gold
+                 FROM live_snapshots WHERE session_id=?1 AND is_local=1
+                 AND game_time >= ?2 ORDER BY game_time ASC LIMIT 1",
+                rusqlite::params![session_id, target_time],
+                |row| Ok(serde_json::json!({
+                    "minute": min,
+                    "game_time": row.get::<_, f64>(0)?,
+                    "kills": row.get::<_, i64>(1)?,
+                    "deaths": row.get::<_, i64>(2)?,
+                    "assists": row.get::<_, i64>(3)?,
+                    "cs": row.get::<_, i64>(4)?,
+                    "ward_score": row.get::<_, f64>(5)?,
+                    "item_gold": row.get::<_, i64>(6)?,
+                })),
+            );
+            if let Ok(val) = result {
+                results.push(val);
+            }
+        }
+        Ok(results)
+    }
+
+    /// Get team gold snapshots for a session (for gold diff reconstruction)
+    pub fn get_team_gold_by_minute(&self, session_id: &str) -> Result<Vec<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT CAST(game_time/60 AS INTEGER) as minute, team, SUM(item_gold) as total_gold
+             FROM live_snapshots WHERE session_id=?1
+             GROUP BY minute, team ORDER BY minute"
+        )?;
+        let rows = stmt.query_map([session_id], |row| {
+            Ok(serde_json::json!({
+                "minute": row.get::<_, i64>(0)?,
+                "team": row.get::<_, String>(1)?,
+                "gold": row.get::<_, i64>(2)?,
+            }))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    /// Get death events from live capture for a session
+    pub fn get_live_death_events(&self, session_id: &str) -> Result<Vec<serde_json::Value>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let mut stmt = conn.prepare(
+            "SELECT game_time, event_name, description FROM live_game_events
+             WHERE session_id=?1 AND event_name='ChampionKill' ORDER BY game_time"
+        )?;
+        let rows = stmt.query_map([session_id], |row| {
+            Ok(serde_json::json!({
+                "game_time": row.get::<_, f64>(0)?,
+                "event_name": row.get::<_, String>(1)?,
+                "description": row.get::<_, String>(2)?,
+            }))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
+    }
+
+    /// Get the most recent live session for a puuid
+    pub fn get_latest_session(&self, puuid: &str) -> Result<Option<String>, AppError> {
+        let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
+        let result = conn.query_row(
+            "SELECT session_id FROM live_sessions WHERE puuid=?1 ORDER BY started_at DESC LIMIT 1",
+            [puuid],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     /// Get active improvement goals
     pub fn get_goals(&self, puuid: &str) -> Result<Vec<serde_json::Value>, AppError> {
         let conn = self.conn.lock().map_err(|e| AppError::Custom(e.to_string()))?;
@@ -487,6 +621,22 @@ impl Database {
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.into())
     }
+}
+
+/// Row data for a live game snapshot
+pub struct LiveSnapshotRow {
+    pub game_time: f64,
+    pub player_name: String,
+    pub champion: String,
+    pub team: String,
+    pub level: i64,
+    pub kills: i64,
+    pub deaths: i64,
+    pub assists: i64,
+    pub cs: i64,
+    pub ward_score: f64,
+    pub item_gold: i64,
+    pub is_local: bool,
 }
 
 /// Row data for inserting a match participant

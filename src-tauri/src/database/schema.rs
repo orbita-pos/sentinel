@@ -194,3 +194,47 @@ CREATE TABLE IF NOT EXISTS improvement_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_puuid ON improvement_snapshots(puuid, metric_key, snapshot_date);
 ";
+
+/// Migration 006: Live game timeline capture (no API key needed)
+pub const MIGRATION_006_LIVE_CAPTURE: &str = "
+CREATE TABLE IF NOT EXISTS live_snapshots (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          TEXT NOT NULL,
+    game_time           REAL NOT NULL,
+    player_name         TEXT NOT NULL,
+    champion            TEXT NOT NULL,
+    team                TEXT NOT NULL,
+    level               INTEGER NOT NULL,
+    kills               INTEGER NOT NULL,
+    deaths              INTEGER NOT NULL,
+    assists             INTEGER NOT NULL,
+    cs                  INTEGER NOT NULL,
+    ward_score          REAL NOT NULL DEFAULT 0,
+    item_gold           INTEGER NOT NULL DEFAULT 0,
+    is_local            INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_snap_session ON live_snapshots(session_id, game_time);
+
+CREATE TABLE IF NOT EXISTS live_game_events (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          TEXT NOT NULL,
+    game_time           REAL NOT NULL,
+    event_name          TEXT NOT NULL,
+    description         TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_live_events_session ON live_game_events(session_id);
+
+CREATE TABLE IF NOT EXISTS live_sessions (
+    session_id          TEXT PRIMARY KEY,
+    match_id            TEXT,
+    puuid               TEXT NOT NULL,
+    local_champion      TEXT NOT NULL DEFAULT '',
+    game_mode           TEXT NOT NULL DEFAULT '',
+    game_duration       REAL NOT NULL DEFAULT 0,
+    win                 INTEGER,
+    started_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at            TEXT
+);
+";

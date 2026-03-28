@@ -411,6 +411,8 @@ pub fn run() {
             let mut lcu_rx = lcu_manager.subscribe();
             let gc_app_handle = app_handle.clone();
             let gc_live_state = live_game_state.clone();
+            let gc_db = db.clone();
+            let gc_lcu = lcu_manager.clone();
 
             tauri::async_runtime::spawn(async move {
                 let mut poller_handle: Option<tokio::task::JoinHandle<()>> = None;
@@ -425,16 +427,53 @@ pub fn run() {
                                         tracing::info!("Game started, spawning live game poller");
                                         let handle = gc_app_handle.clone();
                                         let state_ref = gc_live_state.clone();
+                                        let poller_db = gc_db.clone();
+
+                                        // Get puuid from LCU manager
+                                        let puuid = gc_lcu
+                                            .get_state()
+                                            .summoner
+                                            .map(|s| s.puuid.clone())
+                                            .unwrap_or_default();
 
                                         poller_handle = Some(tokio::spawn(async move {
                                             let mut poller =
-                                                game_client::poller::GameClientPoller::new(handle);
+                                                game_client::poller::GameClientPoller::new(
+                                                    handle,
+                                                    Some(poller_db.clone()),
+                                                    puuid.clone(),
+                                                );
+                                            let session_id = poller.session_id().to_string();
+
                                             if let Err(e) = poller.run().await {
                                                 tracing::warn!("Game poller error: {e}");
                                             }
-                                            // Store final state then clear
+
+                                            // Extract features from live capture
+                                            let final_state = poller.get_state();
+                                            if !puuid.is_empty() && final_state.game_time > 300.0 {
+                                                let local = final_state.my_team.iter().find(|p| p.is_local_player);
+                                                if let Some(local) = local {
+                                                    if let Some(features) = analysis::live_timeline::extract_features_from_session(
+                                                        &poller_db,
+                                                        &session_id,
+                                                        &puuid,
+                                                        &local.champion,
+                                                        0, // champion_id not available from Game Client API
+                                                        "", // role
+                                                        false, // win unknown yet
+                                                        final_state.game_time,
+                                                    ) {
+                                                        let fj = serde_json::to_string(&features).unwrap_or_default();
+                                                        let match_id = format!("live_{session_id}");
+                                                        let _ = poller_db.store_features(&match_id, &puuid, &fj);
+                                                        tracing::info!("Extracted features from live session {session_id}");
+                                                    }
+                                                }
+                                            }
+
+                                            // Store final state
                                             {
-                                                let final_state = poller.get_state();
                                                 let mut lock = state_ref.lock().await;
                                                 *lock = Some(final_state);
                                             }

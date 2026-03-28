@@ -35,6 +35,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "patterns",
         sql: schema::MIGRATION_005_PATTERNS,
     },
+    Migration {
+        version: 6,
+        name: "live_capture",
+        sql: schema::MIGRATION_006_LIVE_CAPTURE,
+    },
 ];
 
 pub fn run_all(conn: &Connection) -> Result<(), AppError> {
