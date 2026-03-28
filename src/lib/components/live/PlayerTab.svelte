@@ -12,19 +12,61 @@
   let opggBuild: any = $state(null);
   let opggLoading = $state(false);
 
-  // Fetch OP.GG build once per champion
+  // Enemy build predictions from OP.GG
+  let enemyBuilds: Record<string, any> = $state({});
+  let enemyBuildsFetched = $state(false);
+
+  // Fetch OP.GG build once per champion (yours + all enemies)
   let lastChampFetched = $state("");
   $effect(() => {
     const me = state.my_team.find(p => p.is_local_player);
     if (!me || me.champion === lastChampFetched || opggLoading) return;
     lastChampFetched = me.champion;
     opggLoading = true;
-    // Guess position from team composition or default to "all"
     invoke("get_opgg_build", { champion: me.champion, position: "all" })
       .then((result: any) => { opggBuild = result; })
       .catch((e: any) => console.warn("OP.GG build fetch:", e))
       .finally(() => { opggLoading = false; });
+
+    // Fetch enemy builds (Phase C)
+    if (!enemyBuildsFetched && state.enemy_team.length > 0) {
+      enemyBuildsFetched = true;
+      for (const enemy of state.enemy_team) {
+        if (!enemy.champion || enemyBuilds[enemy.champion]) continue;
+        invoke("get_opgg_build", { champion: enemy.champion, position: "all" })
+          .then((result: any) => {
+            enemyBuilds[enemy.champion] = result;
+            enemyBuilds = enemyBuilds; // trigger reactivity
+          })
+          .catch(() => {});
+      }
+    }
   });
+
+  // Predict next item for an enemy based on OP.GG core build vs current items
+  function predictNextItem(enemy: any): { id: number; name: string } | null {
+    const build = enemyBuilds[enemy.champion];
+    if (!build?.core_items?.item_ids) return null;
+
+    const owned = new Set(enemy.items.map((i: any) => i.item_id));
+    // Check core items first
+    for (let i = 0; i < build.core_items.item_ids.length; i++) {
+      const id = build.core_items.item_ids[i];
+      if (!owned.has(id)) {
+        return { id, name: build.core_items.item_names?.[i] ?? `Item ${id}` };
+      }
+    }
+    // Check boots
+    if (build.boots?.item_ids) {
+      for (let i = 0; i < build.boots.item_ids.length; i++) {
+        const id = build.boots.item_ids[i];
+        if (!owned.has(id)) {
+          return { id, name: build.boots.item_names?.[i] ?? `Item ${id}` };
+        }
+      }
+    }
+    return null;
+  }
 
   // Fetch intelligence from Rust backend every 5 seconds
   $effect(() => {
@@ -324,28 +366,62 @@
       </div>
     {/if}
 
-    <!-- ═══ THREAT ASSESSMENT ═══ -->
+    <!-- ═══ THREAT ASSESSMENT + ENEMY BUILD PREDICTION ═══ -->
     {#if intel.threats?.length > 0}
       <div class="rounded-xl border p-4" style="background: var(--bg-secondary); border-color: var(--border)">
-        <p class="mb-3 text-[10px] font-bold uppercase tracking-wide" style="color: var(--text-muted)">Threat Assessment</p>
+        <div class="mb-3 flex items-center justify-between">
+          <p class="text-[10px] font-bold uppercase tracking-wide" style="color: var(--text-muted)">Threat Assessment</p>
+          {#if Object.keys(enemyBuilds).length > 0}
+            <span class="text-[9px]" style="color: var(--accent-blue)">Build predictions from OP.GG</span>
+          {/if}
+        </div>
         <div class="space-y-1.5">
           {#each intel.threats as t}
-            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2" style="background: {threatBg[t.threat_level] ?? 'var(--bg-tertiary)'}">
-              <img src={champImg(t.champion)} alt={t.champion} class="h-9 w-9 rounded-lg" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-1.5">
-                  <span class="text-xs font-bold" style="color: var(--text-primary)">{t.champion}</span>
-                  <span class="rounded px-1 py-0.5 text-[8px] font-bold" style="color: {threatColors[t.threat_level] ?? 'var(--text-muted)'}">{t.threat_level}</span>
-                  <span class="rounded px-1 py-0.5 text-[8px]" style="background: var(--bg-primary); color: {t.damage_type === 'AP' ? 'var(--accent-blue)' : 'var(--accent-red)'}">{t.damage_type}</span>
-                  {#if t.has_healing}<span class="text-[8px]" style="color: var(--accent-green)">HEALS</span>{/if}
+            {@const enemyPlayer = state.enemy_team.find(e => e.champion === t.champion)}
+            {@const nextItem = enemyPlayer ? predictNextItem(enemyPlayer) : null}
+            {@const enemyBuild = enemyBuilds[t.champion]}
+            <div class="rounded-lg px-3 py-2" style="background: {threatBg[t.threat_level] ?? 'var(--bg-tertiary)'}">
+              <div class="flex items-center gap-2.5">
+                <img src={champImg(t.champion)} alt={t.champion} class="h-9 w-9 rounded-lg" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-bold" style="color: var(--text-primary)">{t.champion}</span>
+                    <span class="rounded px-1 py-0.5 text-[8px] font-bold" style="color: {threatColors[t.threat_level] ?? 'var(--text-muted)'}">{t.threat_level}</span>
+                    <span class="rounded px-1 py-0.5 text-[8px]" style="background: var(--bg-primary); color: {t.damage_type === 'AP' ? 'var(--accent-blue)' : 'var(--accent-red)'}">{t.damage_type}</span>
+                    {#if t.has_healing}<span class="text-[8px]" style="color: var(--accent-green)">HEALS</span>{/if}
+                  </div>
+                  <div class="text-[10px]" style="color: var(--text-muted)">
+                    {t.kills}/{t.deaths}
+                    {#if t.is_weak} -- <span style="color: var(--accent-green)">not a threat, skip</span>{/if}
+                    {#if t.is_fed} -- <span style="color: var(--accent-red)">build against this</span>{/if}
+                  </div>
                 </div>
-                <div class="text-[10px]" style="color: var(--text-muted)">
-                  {t.kills}/{t.deaths}
-                  {#if t.is_weak} -- <span style="color: var(--accent-green)">not a threat, skip</span>{/if}
-                  {#if t.is_fed} -- <span style="color: var(--accent-red)">build against this</span>{/if}
-                </div>
+                <span class="text-[10px] font-medium shrink-0" style="color: var(--accent-gold)">{fmtGold(t.gold)}</span>
               </div>
-              <span class="text-[10px] font-medium shrink-0" style="color: var(--accent-gold)">{fmtGold(t.gold)}</span>
+              <!-- Enemy build prediction -->
+              {#if nextItem || enemyBuild}
+                <div class="mt-1.5 flex items-center gap-2 pl-11">
+                  {#if nextItem}
+                    <div class="flex items-center gap-1 rounded px-1.5 py-0.5" style="background: rgba(168,85,247,0.08)">
+                      <div class="h-4 w-4 overflow-hidden rounded">
+                        <img src={itemImg(nextItem.id)} alt="" class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
+                      </div>
+                      <span class="text-[9px]" style="color: var(--accent-purple)">Probably building {nextItem.name}</span>
+                    </div>
+                  {/if}
+                  {#if enemyBuild?.core_items?.item_ids}
+                    <div class="flex items-center gap-0.5 ml-auto">
+                      <span class="text-[8px] mr-1" style="color: var(--text-muted)">Full build:</span>
+                      {#each enemyBuild.core_items.item_ids.slice(0, 3) as eid}
+                        {@const owned = enemyPlayer?.items.some(i => i.item_id === eid)}
+                        <div class="h-4 w-4 overflow-hidden rounded" style="{owned ? 'opacity: 0.3' : ''}">
+                          <img src={itemImg(eid)} alt="" class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
