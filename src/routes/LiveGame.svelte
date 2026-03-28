@@ -35,10 +35,11 @@
   let blueKills = $derived(state?.my_team.reduce((s, p) => s + p.kills, 0) ?? 0);
   let redKills = $derived(state?.enemy_team.reduce((s, p) => s + p.kills, 0) ?? 0);
 
-  // Estimate team gold from items
-  let blueGold = $derived(state?.my_team.reduce((s, p) => s + p.items.reduce((g, i) => g + i.price, 0), 0) ?? 0);
-  let redGold = $derived(state?.enemy_team.reduce((s, p) => s + p.items.reduce((g, i) => g + i.price, 0), 0) ?? 0);
-  let goldDiff = $derived(blueGold - redGold);
+  // Team gold: use item price * count for accurate estimation
+  let blueGold = $derived(state?.my_team.reduce((s, p) => s + p.items.reduce((g, i) => g + i.price * (i.count || 1), 0), 0) ?? 0);
+  let redGold = $derived(state?.enemy_team.reduce((s, p) => s + p.items.reduce((g, i) => g + i.price * (i.count || 1), 0), 0) ?? 0);
+  // Use backend gold diff (more accurate, tracks history)
+  let goldDiff = $derived(state?.team_gold_diff ?? 0);
   let goldDiffStr = $derived(() => {
     const diff = Math.abs(goldDiff);
     const sign = goldDiff >= 0 ? "+" : "-";

@@ -82,13 +82,16 @@
     invoke("get_item_intelligence", {
       myChampion: me.champion,
       myItems: me.items.map(i => i.item_id).filter(id => id > 0),
-      myGold: state.active_player.current_gold,
+      myGold: state.active_player?.current_gold ?? 0,
       enemyChampions: state.enemy_team.map(p => p.champion),
       enemyItems: state.enemy_team.map(p => p.items.map(i => i.item_id).filter(id => id > 0)),
-      enemyStats: state.enemy_team.map(p => [p.kills, p.deaths, p.items.reduce((s, i) => s + i.price, 0)]),
+      enemyStats: state.enemy_team.map(p => [p.kills, p.deaths, p.items.reduce((s: number, i: any) => s + i.price, 0)]),
     }).then((result: any) => {
       intel = result;
-    }).catch(e => console.error("Item intelligence error:", e));
+    }).catch(() => {
+      // Non-fatal: show tab without intel data
+      if (!intel) intel = { threats: [], recommendations: [], enemy_damage: { ad_pct: 50, ap_pct: 50 }, warnings: [], build_path: [], on_next_back: [], my_class: "", my_damage_type: "" };
+    });
   });
 
   let me = $derived(state.my_team.find(p => p.is_local_player));
