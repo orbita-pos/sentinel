@@ -61,18 +61,17 @@ impl GameClientPoller {
     pub async fn run(&mut self) -> Result<()> {
         tracing::info!("Game client poller starting (session: {})", self.session_id);
 
-        // Wait for game client API
+        // Wait for game client API (retry indefinitely -- loading screens can be long)
         let mut retries = 0;
         loop {
             match self.http.get(format!("{BASE_URL}/gamestats")).send().await {
                 Ok(_) => break,
-                Err(_) if retries < 30 => {
+                Err(_) => {
                     retries += 1;
+                    if retries % 30 == 0 {
+                        tracing::info!("Still waiting for Game Client API ({retries} attempts, {:.0}s)", retries as f64 * 2.0);
+                    }
                     tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-                Err(e) => {
-                    tracing::warn!("Game client not available after {retries} retries: {e}");
-                    return Ok(());
                 }
             }
         }
