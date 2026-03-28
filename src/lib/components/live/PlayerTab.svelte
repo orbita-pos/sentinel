@@ -9,6 +9,22 @@
   // Backend intelligence response
   let intel: any = $state(null);
   let lastFetchTime = $state(0);
+  let opggBuild: any = $state(null);
+  let opggLoading = $state(false);
+
+  // Fetch OP.GG build once per champion
+  let lastChampFetched = $state("");
+  $effect(() => {
+    const me = state.my_team.find(p => p.is_local_player);
+    if (!me || me.champion === lastChampFetched || opggLoading) return;
+    lastChampFetched = me.champion;
+    opggLoading = true;
+    // Guess position from team composition or default to "all"
+    invoke("get_opgg_build", { champion: me.champion, position: "all" })
+      .then((result: any) => { opggBuild = result; })
+      .catch((e: any) => console.warn("OP.GG build fetch:", e))
+      .finally(() => { opggLoading = false; });
+  });
 
   // Fetch intelligence from Rust backend every 5 seconds
   $effect(() => {
@@ -77,6 +93,101 @@
           </div>
         {/each}
       </div>
+    </div>
+  {/if}
+
+  <!-- ═══ OP.GG OPTIMAL BUILD (from millions of matches) ═══ -->
+  {#if opggBuild && opggBuild.core_items?.item_ids?.length > 0}
+    <div class="rounded-xl border p-4" style="background: var(--bg-secondary); border-color: var(--border)">
+      <div class="mb-3 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-[10px] font-bold uppercase tracking-wide" style="color: var(--accent-blue)">OP.GG Optimal Build</span>
+          {#if opggBuild.win_rate > 0}
+            <span class="rounded px-1.5 py-0.5 text-[9px] font-bold" style="background: var(--accent-green); color: white">
+              {(opggBuild.win_rate * 100).toFixed(1)}% WR
+            </span>
+          {/if}
+          {#if opggBuild.tier}
+            <span class="rounded px-1 py-0.5 text-[9px] font-bold" style="background: var(--bg-tertiary); color: var(--accent-gold)">
+              {opggBuild.tier}
+            </span>
+          {/if}
+        </div>
+        <span class="text-[9px]" style="color: var(--text-muted)">Data from millions of ranked games</span>
+      </div>
+
+      <!-- Core Build Path -->
+      <div class="mb-3">
+        <p class="mb-1.5 text-[9px] font-medium" style="color: var(--text-muted)">Core Build ({(opggBuild.core_items.win_rate * 100).toFixed(1)}% WR, {opggBuild.core_items.games?.toLocaleString()} games)</p>
+        <div class="flex gap-1.5">
+          {#each opggBuild.core_items.item_ids as id, i}
+            {@const owned = me?.items.some(it => it.item_id === id)}
+            <div class="relative">
+              <div class="h-10 w-10 overflow-hidden rounded-lg" style="background: var(--bg-primary); {owned ? 'border: 2px solid var(--accent-green)' : 'border: 1px solid var(--border)'}; {owned ? 'opacity: 0.5' : ''}">
+                <img src={itemImg(id)} alt={opggBuild.core_items.item_names?.[i] ?? ''} class="h-full w-full object-cover" title={opggBuild.core_items.item_names?.[i] ?? ''} onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
+              </div>
+              {#if owned}
+                <span class="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full text-[7px] font-bold text-white" style="background: var(--accent-green)">OK</span>
+              {/if}
+            </div>
+          {/each}
+          <div class="flex items-center text-[10px]" style="color: var(--text-muted)">
+            <span class="mx-1">+</span>
+          </div>
+          <!-- Boots -->
+          {#if opggBuild.boots?.item_ids?.length > 0}
+            {#each opggBuild.boots.item_ids as bootId, i}
+              {@const ownedBoot = me?.items.some(it => it.item_id === bootId)}
+              <div class="relative">
+                <div class="h-10 w-10 overflow-hidden rounded-lg" style="background: var(--bg-primary); {ownedBoot ? 'border: 2px solid var(--accent-green); opacity: 0.5' : 'border: 1px solid var(--border)'}">
+                  <img src={itemImg(bootId)} alt={opggBuild.boots.item_names?.[i] ?? ''} class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
+                </div>
+                {#if ownedBoot}
+                  <span class="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full text-[7px] font-bold text-white" style="background: var(--accent-green)">OK</span>
+                {/if}
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
+
+      <!-- Situational Items (4th-6th slot options) -->
+      {#if opggBuild.situational_items?.length > 0}
+        <div>
+          <p class="mb-1.5 text-[9px] font-medium" style="color: var(--text-muted)">Situational (4th-6th item options)</p>
+          <div class="flex flex-wrap gap-1.5">
+            {#each opggBuild.situational_items.slice(0, 6) as sit}
+              {#each sit.item_ids as sid, j}
+                <div class="flex items-center gap-1 rounded px-1.5 py-1" style="background: var(--bg-tertiary)" title="{sit.item_names?.[j] ?? ''} ({(sit.win_rate * 100).toFixed(0)}% WR)">
+                  <div class="h-6 w-6 overflow-hidden rounded">
+                    <img src={itemImg(sid)} alt="" class="h-full w-full object-cover" onerror={(e) => (e.currentTarget as HTMLImageElement).style.display='none'} />
+                  </div>
+                  <span class="text-[9px]" style="color: var(--text-secondary)">{sit.item_names?.[j]?.split(' ')[0] ?? ''}</span>
+                </div>
+              {/each}
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <!-- Runes -->
+      {#if opggBuild.runes?.primary_tree}
+        <div class="mt-3 flex items-center gap-2 border-t pt-2" style="border-color: var(--border)">
+          <span class="text-[9px] font-medium" style="color: var(--text-muted)">Runes:</span>
+          <span class="rounded px-1.5 py-0.5 text-[9px] font-medium" style="background: var(--bg-tertiary); color: var(--accent-purple)">{opggBuild.runes.primary_tree}</span>
+          {#if opggBuild.runes.secondary_tree}
+            <span class="text-[9px]" style="color: var(--text-muted)">+</span>
+            <span class="rounded px-1.5 py-0.5 text-[9px]" style="background: var(--bg-tertiary); color: var(--text-secondary)">{opggBuild.runes.secondary_tree}</span>
+          {/if}
+          {#if opggBuild.runes.win_rate > 0}
+            <span class="text-[9px]" style="color: var(--accent-green)">{(opggBuild.runes.win_rate * 100).toFixed(1)}% WR</span>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {:else if opggLoading}
+    <div class="rounded-xl border p-4" style="background: var(--bg-secondary); border-color: var(--border)">
+      <p class="text-xs" style="color: var(--text-muted)">Loading OP.GG build data...</p>
     </div>
   {/if}
 

@@ -363,6 +363,17 @@ fn get_item_intelligence(
 }
 
 #[tauri::command]
+async fn get_opgg_build(
+    champion: String,
+    position: String,
+) -> Result<serde_json::Value, String> {
+    let build = riot_api::opgg::fetch_champion_build(&champion, &position)
+        .await
+        .map_err(|e| safe_err("OP.GG build", e))?;
+    serde_json::to_value(&build).map_err(|e| safe_err("Serialize build", e))
+}
+
+#[tauri::command]
 fn get_post_game_analysis(
     match_id: String,
     puuid: String,
@@ -746,6 +757,7 @@ pub fn run() {
             get_draft_recommendations,
             get_champion_pool,
             get_item_intelligence,
+            get_opgg_build,
             get_live_game_state,
             has_api_key,
             get_post_game_analysis,
