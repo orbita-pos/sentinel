@@ -22,7 +22,8 @@
     "vite": "^6.4.1"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.10.1"
+    "@tauri-apps/api": "^2.10.1",
+    "@inariwatch/capture": "^0.10.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
